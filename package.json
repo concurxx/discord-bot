@@ -1,0 +1,13 @@
+{
+  "name": "lk-link-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that converts Lords & Knights l+k:// links into clickable embeds",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5"
+  }
+}
