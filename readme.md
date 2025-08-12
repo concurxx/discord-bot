@@ -14,7 +14,7 @@ A simple Discord bot that takes `l+k://` links from Lords & Knights and reposts 
 
 Click the button below to deploy this bot to Heroku:
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
+[![Deploy](https://www.heroku.com/deploy?template=https://github.com/concurxx/discord-bot)](https://www.heroku.com/deploy?template=https://github.com/concurxx/discord-bot)
 
 When prompted on Heroku:
 - **BOT_TOKEN** → Your bot token from the Discord Developer Portal
@@ -47,4 +47,5 @@ When inviting your bot to Discord, make sure it has:
 - Send Messages
 - Embed Links
 - Manage Messages (for deleting the original link)
+
 
