@@ -1,0 +1,27 @@
+{
+    "name": "lk-link-bot",
+    "description": "Discord bot that converts Lords & Knights l+k:// links into clickable embeds",
+    "keywords": ["discord", "bot", "lords-and-knights"],
+    "env": {
+      "BOT_TOKEN": {
+        "description": "Discord bot token from the Developer Portal",
+        "required": true
+      },
+      "ALLOWED_CHANNEL_ID": {
+        "description": "Discord channel ID where the bot will respond",
+        "required": true
+      }
+    },
+    "formation": {
+      "worker": {
+        "quantity": 1,
+        "size": "free"
+      }
+    },
+    "buildpacks": [
+      {
+        "url": "heroku/nodejs"
+      }
+    ]
+  }
+  
