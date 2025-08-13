@@ -28,11 +28,10 @@ client.on("messageCreate", (message) => {
     if (matches) {
         matches.forEach(link => {
             // Extract the code after the "?"
-            const code = link.split("?")[1]?.replace(/&/g, "-");
-            if (!code) return;
+const code = link.split("?")[1];
+const redirectLink = `${REDIRECT_DOMAIN}/bridge?code=${encodeURIComponent(code)}`;
+message.reply(`Here’s your clickable link: ${redirectLink}`);
 
-            // Construct the HTTPS redirect link
-            const redirectLink = `${REDIRECT_DOMAIN}/bridge/${code}`;
 
             // Reply with the clickable link
             message.reply(`Here’s your clickable link: ${redirectLink}`);
@@ -41,3 +40,4 @@ client.on("messageCreate", (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
