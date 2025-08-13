@@ -1,7 +1,10 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 
-// Just store your channel ID directly here as a string
+// Put your channel ID as a string
 const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your actual numeric channel ID
+
+// Your redirect domain from Vercel
+const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app";
 
 const client = new Client({
     intents: [
@@ -24,7 +27,15 @@ client.on("messageCreate", (message) => {
 
     if (matches) {
         matches.forEach(link => {
-            message.reply(`Here’s your clickable link: ${link}`);
+            // Extract the code after the "?"
+            const code = link.split("?")[1]?.replace(/&/g, "-");
+            if (!code) return;
+
+            // Construct the HTTPS redirect link
+            const redirectLink = `${REDIRECT_DOMAIN}/bridge/${code}`;
+
+            // Reply with the clickable link
+            message.reply(`Here’s your clickable link: ${redirectLink}`);
         });
     }
 });
