@@ -85,15 +85,23 @@ client.on("messageCreate", async (message) => {
     const matches = cleanContent.match(bridgePattern);
 
     if (matches) {
-        // Find a line containing "Type: Name" for display
-        let structureLine = cleanContent.split("\n").find(line => line.includes(":"));
-        let displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
-
         for (const link of matches) {
             const code = link.split("?")[1];
             if (!code) continue;
 
             const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+
+            // ----- DUPLICATE CHECK BASED ON BRIDGE CODE ONLY -----
+            const isDuplicate = bridgeList.some(entry => entry.bridgeLink.includes(code));
+            if (isDuplicate) {
+                // Notify the user their bridge is already on the list
+                message.reply(`⚠️ This bridge is already on the list: ${link}`);
+                continue; // Skip adding duplicate
+            }
+
+            // Find a line containing "Type: Name" for display
+            let structureLine = cleanContent.split("\n").find(line => line.includes(":"));
+            let displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
 
             bridgeList.push({
                 bridgeLink: link,
