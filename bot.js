@@ -1,7 +1,15 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 
-const ALLOWED_CHANNEL_ID = process.env.1404945236433830049; // Use numeric channel ID from Discord
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+// Just store your channel ID directly here as a string
+const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your actual numeric channel ID
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
 
 client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
