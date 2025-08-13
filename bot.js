@@ -1,10 +1,12 @@
 const { Client, GatewayIntentBits } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
 
-// Discord channel ID where the bot listens
-const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your actual numeric channel ID
-
-// Vercel redirect domain (serverless function)
-const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/";
+// ================= CONFIG =================
+const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your numeric channel ID
+const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
+const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
+// =========================================
 
 const client = new Client({
     intents: [
@@ -14,9 +16,29 @@ const client = new Client({
     ]
 });
 
-// List to store bridge entries
+// Ensure data folder exists
+if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirname, "data"));
+
+// Load bridge list from JSON file, or start empty
 let bridgeList = [];
+try {
+    if (fs.existsSync(DATA_FILE)) {
+        bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    }
+} catch (err) {
+    console.log("Error reading bridge list file:", err);
+}
+
 let lastListMessage = null;
+
+// Helper to save list to JSON file
+function saveBridgeList() {
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
+    } catch (err) {
+        console.log("Error saving bridge list:", err);
+    }
+}
 
 client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
@@ -24,9 +46,9 @@ client.once("ready", () => {
 
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-    if (message.channel.id !== 1404945236433830049) return;
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
 
-    // Admin commands
+    // --- ADMIN COMMANDS ---
     if (message.content.startsWith("!remove")) {
         if (!message.member.permissions.has("ADMINISTRATOR")) return;
 
@@ -35,12 +57,11 @@ client.on("messageCreate", async (message) => {
         if (isNaN(num) || num < 1 || num > bridgeList.length) return;
 
         bridgeList.splice(num - 1, 1);
+        saveBridgeList();
+
         if (lastListMessage) await lastListMessage.delete();
 
-        const formattedList = bridgeList
-            .map((entry, idx) => `${idx + 1}. ${entry.display}`)
-            .join("\n");
-
+        const formattedList = bridgeList.map((entry, idx) => `${idx + 1}. ${entry.display}`).join("\n\n");
         lastListMessage = await message.channel.send(`**Bridge List:**\n${formattedList}`);
         return;
     }
@@ -49,31 +70,31 @@ client.on("messageCreate", async (message) => {
         if (!message.member.permissions.has("ADMINISTRATOR")) return;
 
         bridgeList = [];
+        saveBridgeList();
+
         if (lastListMessage) await lastListMessage.delete();
         lastListMessage = await message.channel.send("**Bridge List cleared.**");
         return;
     }
 
-    // Detect bridge links in the message
+    // --- BRIDGE LINK DETECTION ---
+    // Remove strikethrough/combining characters for robust detection
+    const cleanContent = message.content.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+
     const bridgePattern = /(l\+k:\/\/bridge\?[^\s]+)/gi;
-    const matches = message.content.match(bridgePattern);
+    const matches = cleanContent.match(bridgePattern);
 
     if (matches) {
-        // Extract first line for structure name/type
-        const firstLine = message.content.split("\n")[0];
-        let displayName = firstLine.trim();
-        if (!displayName.includes(":")) displayName = "Unknown Structure";
-        // Example: "Castle: Fons 21" → "Castle/Fons 21"
-        else displayName = firstLine.split(":").map(s => s.trim()).join("/");
+        // Find a line containing "Type: Name" for display
+        let structureLine = cleanContent.split("\n").find(line => line.includes(":"));
+        let displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
 
         for (const link of matches) {
             const code = link.split("?")[1];
             if (!code) continue;
 
-            // Vercel clickable link
             const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
 
-            // Add to bridge list
             bridgeList.push({
                 bridgeLink: link,
                 vercelLink,
@@ -81,20 +102,19 @@ client.on("messageCreate", async (message) => {
             });
         }
 
+        saveBridgeList();
+
         // Delete previous list message if exists
         if (lastListMessage) {
             try { await lastListMessage.delete(); } 
             catch (err) { console.log("Could not delete previous list message:", err); }
         }
 
-        // Build numbered list
-        const formattedList = bridgeList
-            .map((entry, idx) => `${idx + 1}. ${entry.display}`)
-            .join("\n\n"); // extra newline between entries
-
+        const formattedList = bridgeList.map((entry, idx) => `${idx + 1}. ${entry.display}`).join("\n\n");
         lastListMessage = await message.channel.send(`**Bridge List:**\n${formattedList}`);
+
+        console.log("Bridge links detected and list updated:", bridgeList);
     }
 });
 
-// Login using your bot token from Heroku config vars
 client.login(process.env.DISCORD_TOKEN);
