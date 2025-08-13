@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, PermissionsBitField } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
@@ -50,7 +50,7 @@ client.on("messageCreate", async (message) => {
 
     // --- ADMIN COMMANDS ---
     if (message.content.startsWith("!remove")) {
-        if (!message.member.permissions.has("ADMINISTRATOR")) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
         const parts = message.content.split(" ");
         const num = parseInt(parts[1]);
@@ -67,7 +67,7 @@ client.on("messageCreate", async (message) => {
     }
 
     if (message.content === "!clear") {
-        if (!message.member.permissions.has("ADMINISTRATOR")) return;
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
         bridgeList = [];
         saveBridgeList();
@@ -117,4 +117,5 @@ client.on("messageCreate", async (message) => {
     }
 });
 
+// Login using your bot token from Heroku config vars
 client.login(process.env.DISCORD_TOKEN);
