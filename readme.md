@@ -18,7 +18,7 @@ Click the button below to deploy this bot to Heroku:
 
 When prompted on Heroku:
 - **BOT_TOKEN** → Your bot token from the Discord Developer Portal
-- **ALLOWED_CHANNEL_ID** → The channel ID for `#lords-knights-links`
+- **ALLOWED_CHANNEL_ID** → The channel ID for `1404945236433830049`
 
 ---
 
@@ -28,7 +28,7 @@ When prompted on Heroku:
 2. Create `.env`:
     ```
     BOT_TOKEN=MTQwNDkwNjM4NDU2NjM4NjczOA.GICMjg.ctFHKawXUlrEFANAMSqtZq0aRpHiFJ4wUmp1XA
-    ALLOWED_CHANNEL_ID=#bridge-testing
+    ALLOWED_CHANNEL_ID=1404945236433830049
     ```
 3. Install dependencies:
     ```bash
@@ -47,5 +47,6 @@ When inviting your bot to Discord, make sure it has:
 - Send Messages
 - Embed Links
 - Manage Messages (for deleting the original link)
+
 
 
