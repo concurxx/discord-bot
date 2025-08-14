@@ -41,21 +41,24 @@ function saveBridgeList() {
     }
 }
 
-// Helper to format and sort list
+// ----------------- FORMAT AND SORT LIST -----------------
 function formatBridgeList() {
     const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
     bridgeList.sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
     return bridgeList
-        .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}\n${b.vercel}`)
+        .map((b, i) => {
+            const displayName = `**${i + 1}. ${b.color}${b.name}**`;
+            const clickableLink = `[Open in LNK](${b.vercel})`;
+            return `${displayName}\n${b.bridge}\n${clickableLink}`;
+        })
         .join("\n\n");
 }
 
-// Helper to update the list message in the channel and pin it
+// ----------------- UPDATE LIST MESSAGE -----------------
 async function updateBridgeListMessage(channel) {
     // Delete previous list message if it exists
     if (lastListMessage) {
         try {
-            if (lastListMessage.pinned) await lastListMessage.unpin();
             await lastListMessage.delete();
         } catch {}
     }
@@ -64,11 +67,6 @@ async function updateBridgeListMessage(channel) {
         lastListMessage = await channel.send("Bridge list is currently empty.");
     } else {
         lastListMessage = await channel.send("**Bridge List:**\n\n" + formatBridgeList());
-        try {
-            await lastListMessage.pin();
-        } catch (err) {
-            console.log("Failed to pin message:", err);
-        }
     }
 }
 
@@ -149,41 +147,42 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ----------------- BRIDGE LINK DETECTION -----------------
-    const cleanContent = message.content.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+    // ----------------- BRIDGE LINK DETECTION (BLOCK HANDLING) -----------------
+    const blocks = content.split(/\n\s*\n/); // Split message by empty lines
 
-    const bridgePattern = /(l\+k:\/\/bridge\?[^\s]+)/gi;
-    const matches = cleanContent.match(bridgePattern);
+    for (const block of blocks) {
+        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+        if (!bridgeMatch) continue;
 
-    if (matches) {
-        for (const link of matches) {
-            const code = link.split("?")[1];
-            if (!code) continue;
+        const link = bridgeMatch[0];
+        const code = link.split("?")[1];
+        if (!code) continue;
 
-            const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+        const vercelLink = `${REDIRECT_DOMAIN}/bridge/${encodeURIComponent(code)}`;
 
-            const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
-            if (isDuplicate) {
-                await message.reply(`⚠️ This bridge is already on the list: ${link}`);
-                continue;
-            }
-
-            let structureLine = cleanContent.split("\n").find(line => line.includes(":"));
-            let displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
-
-            bridgeList.push({
-                bridgeLink: link,
-                vercelLink,
-                bridge: link,
-                vercel: vercelLink,
-                name: displayName,
-                color: ""
-            });
+        // Skip duplicates
+        const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
+        if (isDuplicate) {
+            await message.reply(`⚠️ This bridge is already on the list: ${link}`);
+            continue;
         }
 
-        saveBridgeList();
-        await updateBridgeListMessage(message.channel);
+        // Grab the first line in the block with a colon for display name
+        const structureLine = block.split("\n").find(line => line.includes(":"));
+        const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+
+        bridgeList.push({
+            bridgeLink: link,
+            vercelLink,
+            bridge: link,
+            vercel: vercelLink,
+            name: displayName,
+            color: ""
+        });
     }
+
+    saveBridgeList();
+    await updateBridgeListMessage(message.channel);
 });
 
 client.login(process.env.DISCORD_TOKEN);
