@@ -61,7 +61,7 @@ function formatBridgeList() {
         .map((b, i) => {
             const displayName = `**${i + 1}. ${b.color}${b.name.trim()}**`;
             // Inline bridge link + clickable link (no blank gap)
-            const linksLine = `${b.bridgeLink.trim()}  [Open in LNK](${b.vercelLink.trim()})`;
+            const linksLine = `${b.bridgeLink.trim()}  [LNK](${b.vercelLink.trim()})`;
             return `${displayName}\n${linksLine}`;
         })
         .join("\n\n");
@@ -222,3 +222,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
