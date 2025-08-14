@@ -48,10 +48,9 @@ function formatBridgeList() {
 
     return bridgeList
         .map((b, i) => {
-            const displayName = `**${i + 1}. ${b.color}${b.name}**`;
-            const clickableLink = `[Open in LNK](${b.vercel})`;
-            // All 3 lines together, no extra blank line inside
-            return `${displayName}\n${b.bridge}\n${clickableLink}`;
+            const displayName = `**${i + 1}. ${b.color}${b.name.trim()}**`;
+            const clickableLink = `[Open in LNK](${b.vercel.trim()})`;
+            return `${displayName}\n${b.bridge.trim()}\n${clickableLink}`;
         })
         .join("\n\n"); // single blank line between bridge entries
 }
@@ -155,11 +154,11 @@ client.on("messageCreate", async (message) => {
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
         if (!bridgeMatch) continue;
 
-        const link = bridgeMatch[0];
+        const link = bridgeMatch[0].trim(); // <-- Trim any spaces
         const code = link.split("?")[1];
         if (!code) continue;
 
-        const vercelLink = `${REDIRECT_DOMAIN}/b/${code}`;
+        const vercelLink = `${REDIRECT_DOMAIN}/b/${code.trim()}`; // <-- Trim
 
         // Skip duplicates
         const isDuplicate = bridgeList.some(entry => entry.bridgeLink === link);
@@ -170,7 +169,9 @@ client.on("messageCreate", async (message) => {
 
         // Grab the first line in the block with a colon for display name
         const structureLine = block.split("\n").find(line => line.includes(":"));
-        const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+        const displayName = structureLine
+            ? structureLine.split(":").map(s => s.trim()).join("/") // <-- Trim each part
+            : "Unknown Structure";
 
         bridgeList.push({
             bridgeLink: link,
