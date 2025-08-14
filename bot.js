@@ -45,13 +45,15 @@ function saveBridgeList() {
 function formatBridgeList() {
     const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
     bridgeList.sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
+
     return bridgeList
         .map((b, i) => {
             const displayName = `**${i + 1}. ${b.color}${b.name}**`;
             const clickableLink = `[Open in LNK](${b.vercel})`;
+            // All 3 lines together, no extra blank line between
             return `${displayName}\n${b.bridge}\n${clickableLink}`;
         })
-        .join("\n\n");
+        .join("\n\n"); // keep one blank line between bridge entries
 }
 
 // ----------------- UPDATE LIST MESSAGE -----------------
