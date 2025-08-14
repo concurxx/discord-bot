@@ -41,12 +41,18 @@ function saveBridgeList() {
     }
 }
 
-// Helper to format and sort list
+// ----------------- FORMAT & SORT LIST -----------------
 function formatBridgeList() {
     const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
     bridgeList.sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
+
     return bridgeList
-        .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}\n${b.vercel}`)
+        .map((b, i) => {
+            const displayName = `${i + 1}. ${b.color}${b.name}`;
+            const bridgeLine = b.bridge;             // original l+k:// link
+            const vercelLine = `[LNK](${b.vercel})`; // clickable "LNK"
+            return `${displayName}\n${bridgeLine}\n${vercelLine}`;
+        })
         .join("\n\n");
 }
 
