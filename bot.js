@@ -32,7 +32,7 @@ try {
 
 let lastListMessage = null;
 
-// Helper to save list to JSON file
+// ----------------- SAVE TO JSON -----------------
 function saveBridgeList() {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
@@ -56,7 +56,20 @@ function formatBridgeList() {
         .join("\n\n");
 }
 
-// Helper to update the list message in the channel (no pinning)
+// ----------------- CLEAN CHANNEL -----------------
+async function cleanChannel(channel) {
+    try {
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const toDelete = messages.filter(m => m.id !== lastListMessage.id);
+        if (toDelete.size > 0) {
+            await channel.bulkDelete(toDelete, true);
+        }
+    } catch (err) {
+        console.error("❌ Error cleaning channel:", err);
+    }
+}
+
+// ----------------- UPDATE LIST MESSAGE -----------------
 async function updateBridgeListMessage(channel) {
     // Delete previous list message if it exists
     if (lastListMessage) {
@@ -70,12 +83,17 @@ async function updateBridgeListMessage(channel) {
     } else {
         lastListMessage = await channel.send("**Bridge List:**\n\n" + formatBridgeList());
     }
+
+    // Keep only the list in the channel
+    await cleanChannel(channel);
 }
 
+// ----------------- BOT READY -----------------
 client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
+// ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
@@ -96,33 +114,7 @@ client.on("messageCreate", async (message) => {
             bridgeList[num - 1].color = color;
             saveBridgeList();
             await updateBridgeListMessage(message.channel);
-            await message.channel.send(`Updated bridge #${num} to color ${color}`);
-        } else {
-            await message.channel.send("Invalid number.");
         }
-        return;
-    }
-
-    // ----------------- PURGE ALL NON-BOT MESSAGES -----------------
-    if (content === "!purgeall") {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-            return message.channel.send("You don't have permission to use this command.");
-        }
-
-        let deletedCount = 0;
-        let fetched;
-
-        do {
-            fetched = await message.channel.messages.fetch({ limit: 100 });
-            const messagesToDelete = fetched.filter(m => m.author.id !== client.user.id);
-
-            if (messagesToDelete.size > 0) {
-                await message.channel.bulkDelete(messagesToDelete, true);
-                deletedCount += messagesToDelete.size;
-            }
-        } while (fetched.size >= 2);
-
-        message.channel.send(`Deleted ${deletedCount} non-bot messages.`);
         return;
     }
 
@@ -130,8 +122,7 @@ client.on("messageCreate", async (message) => {
     if (content.startsWith("!remove")) {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-        const parts = content.split(" ");
-        const num = parseInt(parts[1]);
+        const num = parseInt(content.split(" ")[1]);
         if (isNaN(num) || num < 1 || num > bridgeList.length) return;
 
         bridgeList.splice(num - 1, 1);
@@ -149,7 +140,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ----------------- BRIDGE LINK DETECTION (BLOCK HANDLING) -----------------
+    // ----------------- BRIDGE LINK DETECTION -----------------
     const blocks = content.split(/\n\s*\n/); // Split message by empty lines
 
     for (const block of blocks) {
@@ -164,10 +155,7 @@ client.on("messageCreate", async (message) => {
 
         // Skip duplicates
         const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
-        if (isDuplicate) {
-            await message.reply(`⚠️ This bridge is already on the list: ${link}`);
-            continue;
-        }
+        if (isDuplicate) continue;
 
         // Grab the first line in the block with a colon for display name
         const structureLine = block.split("\n").find(line => line.includes(":"));
@@ -187,4 +175,5 @@ client.on("messageCreate", async (message) => {
     await updateBridgeListMessage(message.channel);
 });
 
+// ----------------- LOGIN -----------------
 client.login(process.env.DISCORD_TOKEN);
