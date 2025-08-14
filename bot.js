@@ -122,11 +122,20 @@ async function processBridgeLinks(message) {
         if (!bridgeMatch) continue;
 
         const bridgeLink = bridgeMatch[0].trim();
-        const code = encodeURIComponent(bridgeLink.split("?")[1]?.trim());
+
+        // Extract only the actual code (stop at first '&' if present)
+        let code = bridgeLink.split("?")[1]?.trim() || "";
         if (!code) continue;
+        if (code.includes("&")) code = code.split("&")[0];
 
-        const vercelLink = `${REDIRECT_DOMAIN}/b/${code}`;
+        // Generate the Vercel link
+        const vercelLink = `${REDIRECT_DOMAIN}/b/${encodeURIComponent(code)}`;
 
+        // Log the link for debugging
+        console.log(`Detected bridge: ${bridgeLink}`);
+        console.log(`Generated Vercel link: ${vercelLink}`);
+
+        // Skip duplicates
         const isDuplicate = bridgeList.some(entry =>
             entry.bridgeLink.toLowerCase() === bridgeLink.toLowerCase() ||
             entry.vercelLink.toLowerCase() === vercelLink.toLowerCase()
