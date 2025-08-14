@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your channel ID
-const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
+const ALLOWED_CHANNEL_ID = "YOUR_CHANNEL_ID"; // Replace with your Discord channel ID
+const REDIRECT_DOMAIN = process.env.VERCEL_DOMAIN || "https://lnk-redirect.vercel.app"; 
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "bridgeList.json");
 const LIST_MESSAGE_FILE = path.join(DATA_DIR, "listMessage.json");
@@ -43,7 +43,7 @@ try {
     console.error("❌ Error reading list message file:", err);
 }
 
-// ----------------- SAVE TO JSON (ASYNC) -----------------
+// ----------------- SAVE TO JSON -----------------
 async function saveBridgeList() {
     try {
         await fs.promises.writeFile(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
@@ -59,40 +59,31 @@ function formatBridgeList() {
 
     return bridgeList
         .map((b, i) => {
-            const colorSymbol = b.color || "⚪"; // placeholder for uncolored bridges
-            const displayName = `**${i + 1}. ${colorSymbol}${b.name.trim()}**`;
-            const linksLine = `${b.bridgeLink.trim()} [LNK](${b.vercelLink.trim()})`;
+            const displayName = `**${i + 1}. ${b.color}${b.name.trim()}**`;
+            const linksLine = `${b.bridgeLink.trim()}  [LNK](${b.vercelLink.trim()})`;
             return `${displayName}\n${linksLine}`;
         })
-        .join("\n\n"); // keep single blank line between each bridge
+        .join("\n\n");
 }
 
 // ----------------- CLEAN CHANNEL (KEEP ONLY LIST) -----------------
 async function cleanChannel(channel) {
     try {
-        let fetched;
-        do {
-            fetched = await channel.messages.fetch({ limit: 100 });
-            const toDelete = fetched.filter(m => m.id !== lastListMessageId);
-            if (toDelete.size > 0) {
-                await channel.bulkDelete(toDelete, true);
-            }
-        } while (fetched.size >= 2);
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const toDelete = messages.filter(m => m.id !== lastListMessageId);
+        if (toDelete.size > 0) {
+            await channel.bulkDelete(toDelete, true);
+        }
     } catch (err) {
         console.error("❌ Error cleaning channel:", err);
     }
 }
 
-// ----------------- UPDATE LIST MESSAGE (PERSISTENT) -----------------
+// ----------------- UPDATE LIST MESSAGE -----------------
 async function updateBridgeListMessage(channel) {
-    let listContent;
-
-    if (bridgeList.length === 0) {
-        // Placeholder entry when list is empty
-        listContent = "**Bridge List:**\n\n**1. ⚪ No bridges yet**\nBridge link here [LNK](https://example.com)";
-    } else {
-        listContent = "**Bridge List:**\n\n" + formatBridgeList();
-    }
+    const listContent = bridgeList.length === 0
+        ? "Bridge list is currently empty."
+        : "**Bridge List:**\n\n" + formatBridgeList();
 
     try {
         if (lastListMessageId) {
@@ -122,20 +113,16 @@ async function processBridgeLinks(message) {
         if (!bridgeMatch) continue;
 
         const bridgeLink = bridgeMatch[0].trim();
-
-        // Extract only the actual code (stop at first '&' if present)
         let code = bridgeLink.split("?")[1]?.trim() || "";
         if (!code) continue;
-        if (code.includes("&")) code = code.split("&")[0];
 
-        // Generate the Vercel link
-        const vercelLink = `${REDIRECT_DOMAIN}/b/${encodeURIComponent(code)}`;
+        // Replace & with - for Express-safe URLs
+        const urlSafeCode = code.replace(/&/g, "-");
+        const vercelLink = `${REDIRECT_DOMAIN}/bridge/${encodeURIComponent(urlSafeCode)}`;
 
-        // Log the link for debugging
         console.log(`Detected bridge: ${bridgeLink}`);
         console.log(`Generated Vercel link: ${vercelLink}`);
 
-        // Skip duplicates
         const isDuplicate = bridgeList.some(entry =>
             entry.bridgeLink.toLowerCase() === bridgeLink.toLowerCase() ||
             entry.vercelLink.toLowerCase() === vercelLink.toLowerCase()
@@ -159,8 +146,7 @@ async function processBridgeLinks(message) {
 
     if (addedCount > 0) {
         await saveBridgeList();
-        const channel = message.channel;
-        await updateBridgeListMessage(channel);
+        await updateBridgeListMessage(message.channel);
     }
 }
 
@@ -182,22 +168,37 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
 
-    const content = message.content.trim();
+    const content = message.content;
 
-    // Color Tag Commands
-    if (/^!(red|yellow|green)\s+\d+$/i.test(content)) {
-        const [cmd, numStr] = content.split(/\s+/);
+    // Color commands
+    if (/^!(red|yellow|green) \d+$/i.test(content)) {
+        const [cmd, numStr] = content.split(" ");
         const num = parseInt(numStr, 10);
-
         if (num > 0 && num <= bridgeList.length) {
             const colors = { "!red": "🔴", "!yellow": "🟡", "!green": "🟢" };
             bridgeList[num - 1].color = colors[cmd.toLowerCase()];
             await saveBridgeList();
             await updateBridgeListMessage(message.channel);
         }
+        return;
     }
 
-    // Remove Command
+    // Purge messages
+    if (content === "!purgeall") {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return;
+        let fetched;
+        do {
+            fetched = await message.channel.messages.fetch({ limit: 100 });
+            const messagesToDelete = fetched.filter(m => m.author.id !== client.user.id);
+            if (messagesToDelete.size > 0) {
+                await message.channel.bulkDelete(messagesToDelete, true);
+                await new Promise(res => setTimeout(res, 1000));
+            }
+        } while (fetched.size >= 2);
+        return;
+    }
+
+    // Remove command
     if (content.startsWith("!remove")) {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         const num = parseInt(content.split(" ")[1]);
@@ -205,23 +206,21 @@ client.on("messageCreate", async (message) => {
         bridgeList.splice(num - 1, 1);
         await saveBridgeList();
         await updateBridgeListMessage(message.channel);
+        return;
     }
 
-    // Clear Command
+    // Clear command
     if (content === "!clear") {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
         bridgeList = [];
         await saveBridgeList();
         await updateBridgeListMessage(message.channel);
+        return;
     }
 
-    // Detect Bridge Links
+    // Detect and add bridge links
     await processBridgeLinks(message);
-
-    // --- REAL-TIME CLEANUP ---
-    if (message.id !== lastListMessageId) {
-        await message.delete().catch(() => null);
-    }
 });
 
+// ----------------- LOGIN -----------------
 client.login(process.env.DISCORD_TOKEN);
