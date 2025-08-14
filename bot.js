@@ -60,10 +60,24 @@ function formatBridgeList() {
     return bridgeList
         .map((b, i) => {
             const displayName = `**${i + 1}. ${b.color}${b.name.trim()}**`;
-            const clickableLink = `[Open in LNK](${b.vercelLink.trim()})`;
-            return `${displayName}\n${b.bridgeLink.trim()}\n${clickableLink}`;
+            // Inline bridge link + clickable link (no blank gap)
+            const linksLine = `${b.bridgeLink.trim()}  [Open in LNK](${b.vercelLink.trim()})`;
+            return `${displayName}\n${linksLine}`;
         })
         .join("\n\n");
+}
+
+// ----------------- CLEAN CHANNEL (KEEP ONLY LIST) -----------------
+async function cleanChannel(channel) {
+    try {
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const toDelete = messages.filter(m => m.id !== lastListMessageId);
+        if (toDelete.size > 0) {
+            await channel.bulkDelete(toDelete, true);
+        }
+    } catch (err) {
+        console.error("❌ Error cleaning channel:", err);
+    }
 }
 
 // ----------------- UPDATE LIST MESSAGE (PERSISTENT) -----------------
@@ -77,12 +91,14 @@ async function updateBridgeListMessage(channel) {
             const oldMsg = await channel.messages.fetch(lastListMessageId).catch(() => null);
             if (oldMsg) {
                 await oldMsg.edit(listContent);
+                await cleanChannel(channel);
                 return;
             }
         }
         const newMsg = await channel.send(listContent);
         lastListMessageId = newMsg.id;
         fs.writeFileSync(LIST_MESSAGE_FILE, JSON.stringify({ id: lastListMessageId }), "utf8");
+        await cleanChannel(channel);
     } catch (err) {
         console.error("❌ Error updating bridge list message:", err);
     }
@@ -107,10 +123,7 @@ async function processBridgeLinks(message) {
             entry.bridgeLink.toLowerCase().trim() === bridgeLink.toLowerCase() ||
             entry.vercelLink.toLowerCase().trim() === vercelLink.toLowerCase()
         );
-        if (isDuplicate) {
-            await message.reply(`⚠️ This bridge is already on the list: ${bridgeLink}`);
-            continue;
-        }
+        if (isDuplicate) continue;
 
         const structureLine = block.split("\n").find(line => line.includes(":"));
         const displayName = structureLine
@@ -130,7 +143,6 @@ async function processBridgeLinks(message) {
     if (addedCount > 0) {
         await saveBridgeList();
         await updateBridgeListMessage(message.channel);
-        await message.reply(`✅ Added ${addedCount} new bridge${addedCount > 1 ? "s" : ""} to the list.`);
     }
 }
 
@@ -164,9 +176,6 @@ client.on("messageCreate", async (message) => {
             bridgeList[num - 1].color = colors[cmd.toLowerCase()];
             await saveBridgeList();
             await updateBridgeListMessage(message.channel);
-            await message.channel.send(`Updated bridge #${num} to color ${bridgeList[num - 1].color}`);
-        } else {
-            await message.channel.send("Invalid number.");
         }
         return;
     }
@@ -174,20 +183,17 @@ client.on("messageCreate", async (message) => {
     // Purge Non-Bot Messages
     if (content === "!purgeall") {
         if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-            return message.channel.send("You don't have permission to use this command.");
+            return;
         }
-        let deletedCount = 0;
         let fetched;
         do {
             fetched = await message.channel.messages.fetch({ limit: 100 });
             const messagesToDelete = fetched.filter(m => m.author.id !== client.user.id);
             if (messagesToDelete.size > 0) {
                 await message.channel.bulkDelete(messagesToDelete, true);
-                deletedCount += messagesToDelete.size;
                 await new Promise(res => setTimeout(res, 1000)); // avoid rate limit
             }
         } while (fetched.size >= 2);
-        message.channel.send(`Deleted ${deletedCount} non-bot messages.`);
         return;
     }
 
