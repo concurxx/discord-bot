@@ -50,15 +50,14 @@ function formatBridgeList() {
         .map((b, i) => {
             const displayName = `**${i + 1}. ${b.color}${b.name}**`;
             const clickableLink = `[Open in LNK](${b.vercel})`;
-            // All 3 lines together, no extra blank line between
+            // All 3 lines together, no extra blank line inside
             return `${displayName}\n${b.bridge}\n${clickableLink}`;
         })
-        .join("\n\n"); // keep one blank line between bridge entries
+        .join("\n\n"); // single blank line between bridge entries
 }
 
 // ----------------- UPDATE LIST MESSAGE -----------------
 async function updateBridgeListMessage(channel) {
-    // Delete previous list message if it exists
     if (lastListMessage) {
         try {
             await lastListMessage.delete();
@@ -160,10 +159,10 @@ client.on("messageCreate", async (message) => {
         const code = link.split("?")[1];
         if (!code) continue;
 
-        const vercelLink = `${REDIRECT_DOMAIN}/bridge/${encodeURIComponent(code)}`;
+        const vercelLink = `${REDIRECT_DOMAIN}/b/${code}`;
 
         // Skip duplicates
-        const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
+        const isDuplicate = bridgeList.some(entry => entry.bridgeLink === link);
         if (isDuplicate) {
             await message.reply(`⚠️ This bridge is already on the list: ${link}`);
             continue;
