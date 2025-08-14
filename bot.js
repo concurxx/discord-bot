@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "YOUR_CHANNEL_ID"; // Replace with your Discord channel ID
+const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your Discord channel ID
 const REDIRECT_DOMAIN = process.env.VERCEL_DOMAIN || "https://lnk-redirect.vercel.app"; 
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "bridgeList.json");
