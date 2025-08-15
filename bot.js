@@ -62,6 +62,7 @@ async function updateBridgeListMessage(channel) {
         lastListMessage = await channel.send("**Bridge List:**\n\n" + formatBridgeList());
     }
 
+    // Purge other messages in the channel
     const messages = await channel.messages.fetch({ limit: 100 });
     const nonBotMessages = messages.filter(m => m.author.id !== client.user.id);
     if (nonBotMessages.size > 0) await channel.bulkDelete(nonBotMessages, true);
@@ -131,29 +132,28 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ====== Detect ALL bridges reliably ======
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const match = line.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if (!match) continue;
+    // ====== Detect Bridges (Block-based) ======
+    const blocks = content.split(/\n\s*\n/); // Split by empty lines
+    for (const block of blocks) {
+        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+        if (!bridgeMatch) continue;
 
-        const link = match[0];
-        const code = link.split("?")[1];
+        const bridgeLink = bridgeMatch[0].trim();
+        const code = bridgeLink.split("?")[1];
         if (!code) continue;
 
         const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-        const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
-        if (isDuplicate) continue;
 
-        // Look for previous line for display name
-        const prevLine = i > 0 ? lines[i - 1] : "";
-        const displayName = prevLine.includes(":") ? prevLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+        if (bridgeList.some(entry => entry.bridgeLink.toLowerCase() === bridgeLink.toLowerCase())) continue;
+
+        // Use first line with colon for name
+        const displayNameLine = block.split("\n").find(line => line.includes(":"));
+        const displayName = displayNameLine ? displayNameLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
 
         bridgeList.push({
-            bridgeLink: link,
+            bridgeLink,
             vercelLink,
-            bridge: link,
+            bridge: bridgeLink,
             vercel: vercelLink,
             name: displayName,
             color: ""
