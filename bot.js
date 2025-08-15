@@ -132,32 +132,48 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ====== Detect Bridges (Block-based) ======
-    const blocks = content.split(/\n\s*\n/); // Split by empty lines
-    for (const block of blocks) {
-        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if (!bridgeMatch) continue;
+    // ====== Detect Bridges (Line-by-line) ======
+    const lines = content.split("\n");
+    let currentBlock = [];
 
-        const bridgeLink = bridgeMatch[0].trim();
-        const code = bridgeLink.split("?")[1];
-        if (!code) continue;
+    for (const line of lines) {
+        currentBlock.push(line);
 
-        const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+        if (/l\+k:\/\/bridge\?[^\s]+/i.test(line)) {
+            const blockText = currentBlock.join("\n");
+            const bridgeMatch = blockText.match(/l\+k:\/\/bridge\?[^\s]+/i);
+            if (!bridgeMatch) {
+                currentBlock = [];
+                continue;
+            }
 
-        if (bridgeList.some(entry => entry.bridgeLink.toLowerCase() === bridgeLink.toLowerCase())) continue;
+            const bridgeLink = bridgeMatch[0].trim();
+            const code = bridgeLink.split("?")[1];
+            if (!code) {
+                currentBlock = [];
+                continue;
+            }
 
-        // Use first line with colon for name
-        const displayNameLine = block.split("\n").find(line => line.includes(":"));
-        const displayName = displayNameLine ? displayNameLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+            const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+            if (bridgeList.some(entry => entry.bridgeLink.toLowerCase() === bridgeLink.toLowerCase())) {
+                currentBlock = [];
+                continue;
+            }
 
-        bridgeList.push({
-            bridgeLink,
-            vercelLink,
-            bridge: bridgeLink,
-            vercel: vercelLink,
-            name: displayName,
-            color: ""
-        });
+            const displayNameLine = currentBlock.find(l => l.includes(":"));
+            const displayName = displayNameLine ? displayNameLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+
+            bridgeList.push({
+                bridgeLink,
+                vercelLink,
+                bridge: bridgeLink,
+                vercel: vercelLink,
+                name: displayName,
+                color: ""
+            });
+
+            currentBlock = []; // reset for next bridge
+        }
     }
 
     await updateBridgeListMessage(message.channel);
