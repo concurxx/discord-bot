@@ -1,4 +1,7 @@
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
+require('dotenv').config();
+
+const TOKEN = process.env.BOT_TOKEN;
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -9,118 +12,122 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
-const TOKEN = process.env.TOKEN;
-let bridgeList = [];
+let bridges = [];
+let lastListMessageId = null; // store the ID of the last posted list
 
-// Utility: Send updated list in channel
-function sendBridgeList(channel) {
-    if (bridgeList.length === 0) {
-        channel.send("No bridges in the list.");
-        return;
-    }
+client.on('ready', () => {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+});
 
-    const listText = bridgeList
-        .map(b => `${b.color}Castle/${b.name}\n${b.bridge}\n${b.vercel}`)
-        .join("\n\n");
-
-    channel.send(listText);
-}
-
-// Utility: Send private list without vercel links
-function sendPrivateList(user, start, end) {
-    if (bridgeList.length === 0) {
-        user.send("No bridges in the list.");
-        return;
-    }
-
-    let selected;
-    if (start === "all") {
-        selected = bridgeList;
-    } else {
-        const s = Math.max(1, parseInt(start));
-        const e = Math.min(bridgeList.length, parseInt(end));
-        selected = bridgeList.slice(s - 1, e);
-    }
-
-    const listText = selected
-        .map(b => `${b.color}Castle/${b.name}\n${b.bridge}`)
-        .join("\n\n");
-
-    user.send(listText);
-}
-
-// Listen for messages
-client.on("messageCreate", async (message) => {
+client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    // Cleanup all non-bot messages in the channel
-    if (message.guild) {
-        const fetched = await message.channel.messages.fetch({ limit: 50 });
-        const toDelete = fetched.filter(m => !m.author.bot);
-        if (toDelete.size > 0) {
-            message.channel.bulkDelete(toDelete, true);
+    // Add bridge from message
+    if (message.content.includes("l+k://bridge?")) {
+        message.delete().catch(() => {});
+
+        const castleMatch = message.content.match(/Castle:\s(.+?)\n/i);
+        const bridgeMatch = message.content.match(/(l\+k:\/\/bridge\?[^\s]+)/i);
+
+        if (castleMatch && bridgeMatch) {
+            const name = castleMatch[1].trim();
+            const bridgeUrl = bridgeMatch[1].trim();
+            const shortVercel = `https://lnk-redirect.vercel.app//api/bridge?${encodeURIComponent(bridgeUrl.split("?")[1])}`;
+
+            bridges.push({
+                emoji: '',
+                name,
+                bridgeUrl,
+                vercel: shortVercel
+            });
+
+            await updateList(message.channel);
         }
     }
 
-    const content = message.content.trim();
+    // Assign colors
+    if (message.content.startsWith('!green') || message.content.startsWith('!yellow') || message.content.startsWith('!red')) {
+        const parts = message.content.split(' ');
+        const cmd = parts[0];
+        const index = parseInt(parts[1]) - 1;
 
-    // Detect bridge info
-    const castleRegex = /Castle:\s*(.+)/g;
-    const bridgeRegex = /l\+k:\/\/bridge\?([\d]+)&([\w\d]+)&([\d]+)/g;
-
-    let castleMatches = [...content.matchAll(castleRegex)];
-    let bridgeMatches = [...content.matchAll(bridgeRegex)];
-
-    if (castleMatches.length > 0 && bridgeMatches.length > 0) {
-        for (let i = 0; i < Math.min(castleMatches.length, bridgeMatches.length); i++) {
-            const name = castleMatches[i][1].trim();
-            const bridgeRaw = `l+k://bridge?${bridgeMatches[i][1]}&${bridgeMatches[i][2]}&${bridgeMatches[i][3]}`;
-            const vercel = `https://lnk-redirect.vercel.app//api/bridge?code=${bridgeMatches[i][1]}%26${bridgeMatches[i][2]}%26${bridgeMatches[i][3]}`;
-
-            bridgeList.push({ color: "🟢", name, bridge: bridgeRaw, vercel });
-        }
-
-        sendBridgeList(message.channel);
-        return;
-    }
-
-    // Sorting commands
-    if (content.startsWith("!red")) {
-        const num = parseInt(content.split(" ")[1]);
-        if (!isNaN(num) && bridgeList[num - 1]) {
-            bridgeList[num - 1].color = "🔴";
-            sendBridgeList(message.channel);
+        if (!isNaN(index) && bridges[index]) {
+            const colorMap = {
+                '!green': '🟢',
+                '!yellow': '🟡',
+                '!red': '🔴'
+            };
+            bridges[index].emoji = colorMap[cmd];
+            await updateList(message.channel);
         }
     }
 
-    if (content.startsWith("!yellow")) {
-        const num = parseInt(content.split(" ")[1]);
-        if (!isNaN(num) && bridgeList[num - 1]) {
-            bridgeList[num - 1].color = "🟡";
-            sendBridgeList(message.channel);
-        }
-    }
+    // Clear bridge(s)
+    if (message.content.startsWith('!clear')) {
+        const arg = message.content.split(' ')[1];
 
-    if (content.startsWith("!green")) {
-        const num = parseInt(content.split(" ")[1]);
-        if (!isNaN(num) && bridgeList[num - 1]) {
-            bridgeList[num - 1].color = "🟢";
-            sendBridgeList(message.channel);
-        }
-    }
-
-    // Listme command (PM only, no vercel links)
-    if (content.startsWith("!listme")) {
-        const args = content.split(" ").slice(1);
-
-        if (args[0] && args[0].toLowerCase() === "all") {
-            sendPrivateList(message.author, "all");
-        } else if (args.length === 2) {
-            sendPrivateList(message.author, args[0], args[1]);
+        if (arg && arg.toLowerCase() === 'all') {
+            bridges = []; // wipe the list
+            await updateList(message.channel);
         } else {
-            message.author.send("Usage: !listme all  OR  !listme <start> <end>");
+            const index = parseInt(arg) - 1;
+            if (!isNaN(index) && bridges[index]) {
+                bridges.splice(index, 1);
+                await updateList(message.channel);
+            }
+        }
+    }
+
+    // PM list
+    if (message.content.startsWith('!listme')) {
+        let range = message.content.replace('!listme', '').trim();
+        let listItems = [];
+
+        if (range.toLowerCase() === 'all') {
+            listItems = bridges;
+        } else if (range.includes('-')) {
+            const [start, end] = range.split('-').map(n => parseInt(n));
+            listItems = bridges.slice(start - 1, end);
+        } else {
+            const index = parseInt(range) - 1;
+            if (!isNaN(index) && bridges[index]) {
+                listItems = [bridges[index]];
+            }
+        }
+
+        if (listItems.length > 0) {
+            const pmList = listItems.map(b =>
+                `${b.emoji}${b.name}\n${b.bridgeUrl}`
+            ).join('\n\n');
+
+            try {
+                await message.author.send(pmList);
+            } catch (err) {
+                console.error('❌ Could not DM user:', err);
+            }
         }
     }
 });
+
+async function updateList(channel) {
+    const listMsg = bridges.length > 0
+        ? bridges.map((b, i) =>
+            `${i + 1}. ${b.emoji}${b.name}\n${b.bridgeUrl}\n[LNK](${b.vercel})`
+        ).join('\n\n')
+        : '*No bridges available*';
+
+    if (lastListMessageId) {
+        try {
+            const prevMessage = await channel.messages.fetch(lastListMessageId);
+            await prevMessage.edit(listMsg);
+            return;
+        } catch {
+            // If message no longer exists, just send a new one
+        }
+    }
+
+    const sentMessage = await channel.send(listMsg);
+    lastListMessageId = sentMessage.id;
+}
 
 client.login(TOKEN);
