@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Replace with your numeric channel ID
-const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
+const ALLOWED_CHANNEL_ID = "1404945236433830049"; // Discord channel ID
+const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Vercel redirect URL
 const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
 // =========================================
 
@@ -17,132 +17,136 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-// Ensure data folder exists
 if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirname, "data"));
 
-// Load bridge list from JSON file, or start empty
 let bridgeList = [];
 try {
-    if (fs.existsSync(DATA_FILE)) {
-        bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    }
+    if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
 } catch (err) {
-    console.log("Error reading bridge list file:", err);
+    console.error("Error reading bridge list:", err);
 }
 
 let lastListMessage = null;
 
-// Helper to save list to JSON file
 function saveBridgeList() {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
     } catch (err) {
-        console.log("Error saving bridge list:", err);
+        console.error("Error saving bridge list:", err);
     }
 }
 
-// Helper to format and sort list
 function formatBridgeList() {
     const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
     bridgeList.sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
     return bridgeList
-        .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}\n[LNK](${b.vercel})`)
+        .map((b, i) => {
+            const displayName = `**${i + 1}. ${b.color}${b.name}**`;
+            return `${displayName}\n${b.bridge}\n[LNK](${b.vercel})`;
+        })
         .join("\n\n");
 }
 
-// Helper to update the list message in the channel (keeps only the list)
 async function updateBridgeListMessage(channel) {
     try {
         const messages = await channel.messages.fetch({ limit: 100 });
-        // Delete all previous messages except the last list message
-        const toDelete = messages.filter(m => m.id !== lastListMessage?.id);
-        if (toDelete.size > 0) await channel.bulkDelete(toDelete, true);
-    } catch {}
 
-    if (bridgeList.length === 0) {
-        lastListMessage = await channel.send("Bridge list is currently empty.");
+        // Delete all messages that aren't the last list message
+        const toDelete = messages.filter(
+            m => m.id !== lastListMessage?.id && !m.author.bot
+        );
+        if (toDelete.size > 0) await channel.bulkDelete(toDelete, true);
+    } catch (err) {
+        console.error("Error cleaning messages:", err);
+    }
+
+    const formattedList = bridgeList.length === 0
+        ? "Bridge list is currently empty."
+        : "**Bridge List:**\n\n" + formatBridgeList();
+
+    if (lastListMessage) {
+        await lastListMessage.edit(formattedList).catch(async () => {
+            lastListMessage = await channel.send(formattedList);
+        });
     } else {
-        lastListMessage = await channel.send("**Bridge List:**\n\n" + formatBridgeList());
+        lastListMessage = await channel.send(formattedList);
     }
 }
 
-// ----------------- BOT READY -----------------
 client.once("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
 
     const content = message.content;
 
-    // ----------------- COLOR TAG COMMANDS -----------------
+    // ----------------- COLOR COMMANDS -----------------
     if (/^!(red|yellow|green) \d+$/i.test(content)) {
         const [cmd, numStr] = content.split(" ");
         const num = parseInt(numStr, 10);
-
         if (num > 0 && num <= bridgeList.length) {
-            let color = "";
-            if (cmd.toLowerCase() === "!red") color = "🔴";
-            if (cmd.toLowerCase() === "!yellow") color = "🟡";
-            if (cmd.toLowerCase() === "!green") color = "🟢";
-
-            bridgeList[num - 1].color = color;
+            const colors = { "!red": "🔴", "!yellow": "🟡", "!green": "🟢" };
+            bridgeList[num - 1].color = colors[cmd.toLowerCase()];
             saveBridgeList();
             await updateBridgeListMessage(message.channel);
         }
         return;
     }
 
-    // ----------------- REMOVE & CLEAR -----------------
-    if (content.startsWith("!remove")) {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
+    // ----------------- ADMIN REMOVE & CLEAR -----------------
+    if (content.startsWith("!remove") && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         const num = parseInt(content.split(" ")[1]);
-        if (isNaN(num) || num < 1 || num > bridgeList.length) return;
-
-        bridgeList.splice(num - 1, 1);
-        saveBridgeList();
-        await updateBridgeListMessage(message.channel);
+        if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
+            bridgeList.splice(num - 1, 1);
+            saveBridgeList();
+            await updateBridgeListMessage(message.channel);
+        }
         return;
     }
 
-    if (content === "!clear") {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
+    if (content === "!clear" && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         bridgeList = [];
         saveBridgeList();
         await updateBridgeListMessage(message.channel);
         return;
     }
 
-    // ----------------- DM PARTIAL LIST (!listme) -----------------
-    if (content.startsWith("!listme")) {
-        const args = content.split(" ");
-        let start = 1, end = bridgeList.length;
+    // ----------------- PURGE NON-BOT MESSAGES -----------------
+    if (content === "!purgeall" && message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        let fetched;
+        do {
+            fetched = await message.channel.messages.fetch({ limit: 100 });
+            const messagesToDelete = fetched.filter(m => m.author.id !== client.user.id);
+            if (messagesToDelete.size > 0) await message.channel.bulkDelete(messagesToDelete, true);
+        } while (fetched.size >= 2);
+        return;
+    }
 
-        if (args[1] && args[1].includes("-")) {
-            const [s, e] = args[1].split("-").map(n => parseInt(n));
-            if (!isNaN(s) && !isNaN(e)) { start = s; end = e; }
-        }
+    // ----------------- DM LIST COMMAND -----------------
+    if (/^!listme/i.test(content)) {
+        const dmMatch = content.match(/^!listme\s+(\d+)-(\d+)$/i);
+        const allMatch = content.match(/^!listme\s+all$/i);
+        const userDM = await message.author.createDM();
 
-        const lines = bridgeList.slice(start - 1, end)
-            .map((b, i) => `${start + i}. ${b.name}\n${b.bridge}`)
-            .join("\n\n");
-
-        if (lines.length === 0) {
-            await message.author.send("No bridges in that range.");
-        } else {
-            await message.author.send(`**Bridge List ${start}-${end}:**\n\n${lines}`);
+        if (dmMatch) {
+            const start = parseInt(dmMatch[1], 10) - 1;
+            const end = parseInt(dmMatch[2], 10);
+            const slice = bridgeList.slice(start, end)
+                .map(b => `${b.name}\n${b.bridge}`)
+                .join("\n\n");
+            await userDM.send(slice || "No bridges in that range.");
+        } else if (allMatch) {
+            const slice = bridgeList.map(b => `${b.name}\n${b.bridge}`).join("\n\n");
+            await userDM.send(slice || "No bridges in the list.");
         }
         return;
     }
 
     // ----------------- BRIDGE LINK DETECTION -----------------
     const blocks = content.split(/\n\s*\n/);
-
     for (const block of blocks) {
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
         if (!bridgeMatch) continue;
@@ -156,10 +160,9 @@ client.on("messageCreate", async (message) => {
         const isDuplicate = bridgeList.some(entry => entry.bridgeLink?.includes(code));
         if (isDuplicate) continue;
 
-        // Take the **first line with a colon** as the display name
         const structureLine = block.split("\n").find(line => line.includes(":"));
         const displayName = structureLine
-            ? structureLine.split(":")[1].trim()
+            ? structureLine.split(":").map(s => s.trim()).join("/")
             : "Unknown Structure";
 
         bridgeList.push({
@@ -175,5 +178,4 @@ client.on("messageCreate", async (message) => {
     await updateBridgeListMessage(message.channel);
 });
 
-// ----------------- LOGIN -----------------
 client.login(process.env.DISCORD_TOKEN);
