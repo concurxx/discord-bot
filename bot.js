@@ -1,9 +1,9 @@
-const { Client, GatewayIntentBits, Partials, PermissionsBitField } = require("discord.js");
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your numeric channel ID
+const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
 // =========================================
@@ -30,7 +30,7 @@ try {
     console.log("Error reading bridge list file:", err);
 }
 
-let lastListMessages = []; // array to hold multiple list messages
+let lastListMessages = []; // stores message objects for editing
 
 // ----------------- SAVE TO JSON -----------------
 function saveBridgeList() {
@@ -87,19 +87,43 @@ async function cleanChannel(channel) {
 
 // ----------------- UPDATE LIST MESSAGE -----------------
 async function updateBridgeListMessage(channel) {
-    // Delete old list messages
-    for (const msg of lastListMessages) {
-        try { await msg.delete(); } catch {}
-    }
-    lastListMessages = [];
-
     if (bridgeList.length === 0) {
-        const msg = await channel.send("Bridge list is currently empty.");
-        lastListMessages.push(msg);
-    } else {
-        const entries = formatBridgeList(true);
-        const chunks = splitMessage(entries);
+        if (lastListMessages.length > 0) {
+            try {
+                await lastListMessages[0].edit("Bridge list is currently empty.");
+                for (let i = 1; i < lastListMessages.length; i++) {
+                    try { await lastListMessages[i].delete(); } catch {}
+                }
+                lastListMessages = [lastListMessages[0]];
+            } catch {
+                const msg = await channel.send("Bridge list is currently empty.");
+                lastListMessages = [msg];
+            }
+        } else {
+            const msg = await channel.send("Bridge list is currently empty.");
+            lastListMessages = [msg];
+        }
+        return;
+    }
 
+    const entries = formatBridgeList(true);
+    const chunks = splitMessage(entries);
+
+    if (chunks.length === lastListMessages.length) {
+        for (let i = 0; i < chunks.length; i++) {
+            const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
+            try {
+                await lastListMessages[i].edit(header + chunks[i]);
+            } catch {
+                const msg = await channel.send(header + chunks[i]);
+                lastListMessages[i] = msg;
+            }
+        }
+    } else {
+        for (const msg of lastListMessages) {
+            try { await msg.delete(); } catch {}
+        }
+        lastListMessages = [];
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
             const msg = await channel.send(header + chunks[i]);
@@ -107,23 +131,47 @@ async function updateBridgeListMessage(channel) {
         }
     }
 
-    // Keep only the list in the channel
     await cleanChannel(channel);
 }
 
 // ----------------- BOT READY -----------------
-client.once("ready", () => {
+client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+
+    try {
+        const channel = await client.channels.fetch(ALLOWED_CHANNEL_ID);
+        if (!channel) {
+            console.error("❌ Could not find channel for bridge list");
+            return;
+        }
+
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const listMessages = messages
+            .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
+            .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+        if (listMessages.size > 0) {
+            lastListMessages = Array.from(listMessages.values());
+            console.log(`🔄 Re-synced ${lastListMessages.length} list message(s).`);
+            await updateBridgeListMessage(channel);
+        } else {
+            await updateBridgeListMessage(channel);
+            console.log("🆕 No existing list found, created new one.");
+        }
+    } catch (err) {
+        console.error("❌ Error during startup sync:", err);
+    }
 });
 
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
-    // DM COMMANDS
+    const content = message.content;
+
+    // DM Commands
     if (message.channel.type === 1) {
-        if (message.content.startsWith("!listme")) {
-            const includeAll = message.content.trim().toLowerCase() === "!listme all";
+        if (content.startsWith("!listme")) {
             if (bridgeList.length === 0) {
                 await message.author.send("Bridge list is currently empty.");
                 return;
@@ -140,9 +188,8 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // GUILD COMMANDS (restricted to one channel)
+    // Guild Commands
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
-    const content = message.content;
 
     // Color commands
     if (/^!(red|yellow|green) \d+$/i.test(content)) {
@@ -157,27 +204,64 @@ client.on("messageCreate", async (message) => {
             saveBridgeList();
             await updateBridgeListMessage(message.channel);
         }
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
         return;
     }
 
-// Remove
-if (content.startsWith("!remove")) {
-    const num = parseInt(content.split(" ")[1]);
-    if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
-        bridgeList.splice(num - 1, 1);
+    // Remove
+    if (content.startsWith("!remove")) {
+        const num = parseInt(content.split(" ")[1]);
+        if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
+            bridgeList.splice(num - 1, 1);
+            saveBridgeList();
+            await updateBridgeListMessage(message.channel);
+        }
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        return;
+    }
+
+    // Clear the entire list
+    if (content === "!clearlist") {
+        bridgeList = [];
         saveBridgeList();
         await updateBridgeListMessage(message.channel);
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        return;
     }
-    return;
-}
 
+    // Manual resync
+    if (content === "!resync") {
+        try {
+            const messages = await message.channel.messages.fetch({ limit: 100 });
+            const listMessages = messages
+                .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
+                .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-// Clear the entire list (anyone can use)
-else if (content === "!clearlist") {
-    bridges = []; // clear all saved bridges
-    lastMessageId = null; // reset last posted message
-    await updateBridgeMessage(channel); // refresh the channel list (will be empty now)
-}
+            let replyMsg;
+            if (listMessages.size > 0) {
+                lastListMessages = Array.from(listMessages.values());
+                await updateBridgeListMessage(message.channel);
+                replyMsg = await message.reply("🔄 Re-synced bridge list messages.");
+            } else {
+                await updateBridgeListMessage(message.channel);
+                replyMsg = await message.reply("🆕 No existing list found, created a new one.");
+            }
+
+            setTimeout(async () => {
+                try { await message.delete(); } catch {}
+                try { await replyMsg.delete(); } catch {}
+            }, 3000);
+
+        } catch (err) {
+            console.error("❌ Error during manual resync:", err);
+            const errorReply = await message.reply("⚠️ Resync failed — check logs.");
+            setTimeout(async () => {
+                try { await message.delete(); } catch {}
+                try { await errorReply.delete(); } catch {}
+            }, 5000);
+        }
+        return;
+    }
 
     // Bridge link detection
     const blocks = content.split(/\n\s*\n/);
@@ -191,7 +275,6 @@ else if (content === "!clearlist") {
 
         const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
 
-        // skip duplicates
         if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) continue;
 
         const structureLine = block.split("\n").find(line => line.includes(":"));
