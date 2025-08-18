@@ -160,26 +160,24 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Remove
-    if (content.startsWith("!remove")) {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-        const num = parseInt(content.split(" ")[1]);
-        if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
-            bridgeList.splice(num - 1, 1);
-            saveBridgeList();
-            await updateBridgeListMessage(message.channel);
-        }
-        return;
-    }
-
-    // Clear
-    if (content === "!clear") {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-        bridgeList = [];
+// Remove
+if (content.startsWith("!remove")) {
+    const num = parseInt(content.split(" ")[1]);
+    if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
+        bridgeList.splice(num - 1, 1);
         saveBridgeList();
         await updateBridgeListMessage(message.channel);
-        return;
     }
+    return;
+}
+
+
+// Clear the entire list (anyone can use)
+else if (content === "!clearlist") {
+    bridges = []; // clear all saved bridges
+    lastMessageId = null; // reset last posted message
+    await updateBridgeMessage(channel); // refresh the channel list (will be empty now)
+}
 
     // Bridge link detection
     const blocks = content.split(/\n\s*\n/);
