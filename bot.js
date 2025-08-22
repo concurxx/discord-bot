@@ -179,6 +179,21 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- CLEARLIST COMMAND --------
+    if(content === "!clearlist"){
+        const count = bridgeList.length;
+        bridgeList = [];
+        saveBridgeList();
+        await updateBridgeListMessage(message.channel);
+
+        commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
     // -------- !listme --------
     if(content.startsWith("!listme")){
         if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{await message.channel.send(`${message.author}, I can't DM you.`)};return;}
