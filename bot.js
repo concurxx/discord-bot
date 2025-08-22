@@ -6,6 +6,7 @@ const path = require("path");
 const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
+const COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
 // =========================================
 
 const client = new Client({
@@ -30,14 +31,32 @@ try {
     console.log("Error reading bridge list file:", err);
 }
 
+// Load command log
+let commandLog = {};
+try {
+    if (fs.existsSync(COMMAND_LOG_FILE)) {
+        commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8"));
+    }
+} catch (err) {
+    console.error("❌ Error reading command log file:", err);
+}
+
 let lastListMessages = []; // stores message objects for editing
 
-// ----------------- SAVE TO JSON -----------------
+// ----------------- SAVE FUNCTIONS -----------------
 function saveBridgeList() {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
     } catch (err) {
         console.log("Error saving bridge list:", err);
+    }
+}
+
+function saveCommandLog() {
+    try {
+        fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8");
+    } catch (err) {
+        console.error("❌ Error saving command log:", err);
     }
 }
 
@@ -167,7 +186,17 @@ client.once("ready", async () => {
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
+
     const content = message.content;
+    const now = Date.now();
+    const userId = message.author.id;
+
+    // ----------------- LOG ALL COMMANDS -----------------
+    if (!commandLog[userId]) commandLog[userId] = [];
+    commandLog[userId].push({ command: content, timestamp: now });
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
+    saveCommandLog();
 
     // Only respond in the allowed channel
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
@@ -183,7 +212,6 @@ client.on("messageCreate", async (message) => {
             return;
         }
 
-        // Parse range argument
         const args = content.split(" ").slice(1);
         let start = 0, end = bridgeList.length;
 
@@ -198,7 +226,6 @@ client.on("messageCreate", async (message) => {
             }
         }
 
-        // Prepare entries for DM (keep color emojis, no Vercel links)
         const entries = bridgeList
             .slice(start, end)
             .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}`);
@@ -212,7 +239,6 @@ client.on("messageCreate", async (message) => {
             return;
         }
 
-        // Split into DM chunks safely
         const chunks = splitMessage(entries);
 
         try {
@@ -223,7 +249,6 @@ client.on("messageCreate", async (message) => {
                 await message.author.send(header + chunks[i]);
             }
 
-            // Confirm in the channel
             const reply = await message.reply("✅ I've sent you the bridge list via DM!");
             setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
 
@@ -231,12 +256,56 @@ client.on("messageCreate", async (message) => {
             await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs from server members.`);
         }
 
-        // Optionally delete the command message
         setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
         return;
     }
 
-    // ----------------- rest of your message handler (color commands, remove, clear, etc.) -----------------
+    // ----------------- !viewlog command -----------------
+    if (content.startsWith("!viewlog")) {
+        let allLogs = [];
+        for (const user in commandLog) {
+            commandLog[user].forEach(entry => {
+                allLogs.push(`${user} → <t:${Math.floor(entry.timestamp / 1000)}:T> → ${entry.command}`);
+            });
+        }
+
+        allLogs.sort((a, b) => {
+            const timeA = parseInt(a.match(/<t:(\d+):T>/)[1]);
+            const timeB = parseInt(b.match(/<t:(\d+):T>/)[1]);
+            return timeA - timeB;
+        });
+
+        if (allLogs.length === 0) {
+            try {
+                await message.author.send("No commands have been logged in the last 24 hours.");
+            } catch {
+                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs.`);
+            }
+            return;
+        }
+
+        const chunks = splitMessage(allLogs, 1900);
+
+        try {
+            for (let i = 0; i < chunks.length; i++) {
+                const header = i === 0
+                    ? "**Command Log (last 24 hours):**\n\n"
+                    : `**Command Log (Part ${i + 1}):**\n\n`;
+                await message.author.send(header + chunks[i]);
+            }
+
+            const reply = await message.reply("✅ I've sent you the command log via DM!");
+            setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
+
+        } catch {
+            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs from server members.`);
+        }
+
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        return;
+    }
+
+    // ----------------- rest of your original message handler (color commands, remove, clear, etc.) -----------------
     if (/^!(red|yellow|green) \d+$/i.test(content)) {
         const [cmd, numStr] = content.split(" ");
         const num = parseInt(numStr, 10);
@@ -305,7 +374,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ----------------- bridge link detection -----------------
+    // ----------------- Bridge link detection -----------------
     const blocks = content.split(/\n\s*\n/);
     for (const block of blocks) {
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
