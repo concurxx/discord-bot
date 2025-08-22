@@ -193,10 +193,13 @@ client.on("messageCreate", async (message) => {
 
     // ----------------- LOG ALL COMMANDS -----------------
     if (!commandLog[userId]) commandLog[userId] = [];
-    commandLog[userId].push({ command: content, timestamp: now });
-    const dayAgo = now - 24 * 60 * 60 * 1000;
-    commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
-    saveCommandLog();
+    // Note: bridge additions will be logged separately
+    if (!content.startsWith("l+k://")) { 
+        commandLog[userId].push({ command: content, timestamp: now });
+        const dayAgo = now - 24 * 60 * 60 * 1000;
+        commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
+        saveCommandLog();
+    }
 
     // Only respond in the allowed channel
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
@@ -263,9 +266,12 @@ client.on("messageCreate", async (message) => {
     // ----------------- !viewlog command -----------------
     if (content.startsWith("!viewlog")) {
         let allLogs = [];
-        for (const user in commandLog) {
-            commandLog[user].forEach(entry => {
-                allLogs.push(`${user} → <t:${Math.floor(entry.timestamp / 1000)}:T> → ${entry.command}`);
+
+        for (const userId in commandLog) {
+            const user = await client.users.fetch(userId).catch(() => null);
+            const username = user ? user.tag : userId;
+            commandLog[userId].forEach(entry => {
+                allLogs.push(`${username} → <t:${Math.floor(entry.timestamp / 1000)}:T> → ${entry.command}`);
             });
         }
 
@@ -276,11 +282,8 @@ client.on("messageCreate", async (message) => {
         });
 
         if (allLogs.length === 0) {
-            try {
-                await message.author.send("No commands have been logged in the last 24 hours.");
-            } catch {
-                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs.`);
-            }
+            try { await message.author.send("No commands have been logged in the last 24 hours."); }
+            catch { await message.channel.send(`${message.author}, I can't DM you.`); }
             return;
         }
 
@@ -298,84 +301,16 @@ client.on("messageCreate", async (message) => {
             setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
 
         } catch {
-            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs from server members.`);
+            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs.`);
         }
 
         setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
-        return;
-    }
-
-    // ----------------- rest of your original message handler (color commands, remove, clear, etc.) -----------------
-    if (/^!(red|yellow|green) \d+$/i.test(content)) {
-        const [cmd, numStr] = content.split(" ");
-        const num = parseInt(numStr, 10);
-        if (num > 0 && num <= bridgeList.length) {
-            let color = "";
-            if (cmd.toLowerCase() === "!red") color = "🔴";
-            if (cmd.toLowerCase() === "!yellow") color = "🟡";
-            if (cmd.toLowerCase() === "!green") color = "🟢";
-            bridgeList[num - 1].color = color;
-            saveBridgeList();
-            await updateBridgeListMessage(message.channel);
-        }
-        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
-        return;
-    }
-
-    if (content.startsWith("!remove")) {
-        const num = parseInt(content.split(" ")[1]);
-        if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
-            bridgeList.splice(num - 1, 1);
-            saveBridgeList();
-            await updateBridgeListMessage(message.channel);
-        }
-        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
-        return;
-    }
-
-    if (content === "!clearlist") {
-        bridgeList = [];
-        saveBridgeList();
-        await updateBridgeListMessage(message.channel);
-        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
-        return;
-    }
-
-    if (content === "!resync") {
-        try {
-            const messages = await message.channel.messages.fetch({ limit: 100 });
-            const listMessages = messages
-                .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
-                .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-            let replyMsg;
-            if (listMessages.size > 0) {
-                lastListMessages = Array.from(listMessages.values());
-                await updateBridgeListMessage(message.channel);
-                replyMsg = await message.reply("🔄 Re-synced bridge list messages.");
-            } else {
-                await updateBridgeListMessage(message.channel);
-                replyMsg = await message.reply("🆕 No existing list found, created a new one.");
-            }
-
-            setTimeout(async () => {
-                try { await message.delete(); } catch {}
-                try { await replyMsg.delete(); } catch {}
-            }, 3000);
-
-        } catch (err) {
-            console.error("❌ Error during manual resync:", err);
-            const errorReply = await message.reply("⚠️ Resync failed — check logs.");
-            setTimeout(async () => {
-                try { await message.delete(); } catch {}
-                try { await errorReply.delete(); } catch {}
-            }, 5000);
-        }
         return;
     }
 
     // ----------------- Bridge link detection -----------------
     const blocks = content.split(/\n\s*\n/);
+    let bridgesAdded = 0;
     for (const block of blocks) {
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
         if (!bridgeMatch) continue;
@@ -401,6 +336,20 @@ client.on("messageCreate", async (message) => {
             name: displayName,
             color: ""
         });
+
+        bridgesAdded++;
+    }
+
+    // Log bridge addition as a summary
+    if (bridgesAdded > 0) {
+        if (!commandLog[userId]) commandLog[userId] = [];
+        commandLog[userId].push({
+            command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`,
+            timestamp: now
+        });
+        const dayAgo = now - 24 * 60 * 60 * 1000;
+        commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
+        saveCommandLog();
     }
 
     saveBridgeList();
