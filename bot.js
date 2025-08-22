@@ -73,7 +73,7 @@ function formatBridgeList(includeVercel = true) {
     });
 }
 
-// ----------------- SPLIT INTO CHUNKS (keep entries together) -----------------
+// ----------------- SPLIT INTO CHUNKS -----------------
 function splitMessage(entries, maxLength = 1900) {
     const chunks = [];
     let current = "";
@@ -191,33 +191,42 @@ client.on("messageCreate", async (message) => {
     const now = Date.now();
     const userId = message.author.id;
 
-    // ----------------- LOG ALL COMMANDS -----------------
+    // Initialize log for this user if missing
     if (!commandLog[userId]) commandLog[userId] = [];
-    // Note: bridge additions will be logged separately
-    if (!content.startsWith("l+k://")) { 
+
+    // ----------------- COLOR COMMANDS -----------------
+    if (/^!(red|yellow|green) \d+$/i.test(content)) {
+        const [cmd, numStr] = content.split(" ");
+        const num = parseInt(numStr, 10);
+        if (num > 0 && num <= bridgeList.length) {
+            let color = "";
+            if (cmd.toLowerCase() === "!red") color = "🔴";
+            if (cmd.toLowerCase() === "!yellow") color = "🟡";
+            if (cmd.toLowerCase() === "!green") color = "🟢";
+            bridgeList[num - 1].color = color;
+            saveBridgeList();
+            await updateBridgeListMessage(message.channel);
+        }
+
         commandLog[userId].push({ command: content, timestamp: now });
         const dayAgo = now - 24 * 60 * 60 * 1000;
         commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
         saveCommandLog();
+
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        return;
     }
 
-    // Only respond in the allowed channel
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
-
-    // ----------------- !listme command -----------------
+    // ----------------- !listme -----------------
     if (content.startsWith("!listme")) {
         if (bridgeList.length === 0) {
-            try {
-                await message.author.send("Bridge list is currently empty.");
-            } catch {
-                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs from server members.`);
-            }
+            try { await message.author.send("Bridge list is currently empty."); } 
+            catch { await message.channel.send(`${message.author}, I can't DM you.`); }
             return;
         }
 
         const args = content.split(" ").slice(1);
         let start = 0, end = bridgeList.length;
-
         if (args.length > 0) {
             const arg = args[0].toLowerCase();
             if (arg !== "all") {
@@ -229,104 +238,74 @@ client.on("messageCreate", async (message) => {
             }
         }
 
-        const entries = bridgeList
-            .slice(start, end)
-            .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}`);
-
-        if (entries.length === 0) {
-            try {
-                await message.author.send("No entries found for that range.");
-            } catch {
-                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs.`);
-            }
-            return;
-        }
-
+        const entries = bridgeList.slice(start, end).map((b,i)=>`${i+1}. ${b.color}${b.name}\n${b.bridge}`);
         const chunks = splitMessage(entries);
 
         try {
-            for (let i = 0; i < chunks.length; i++) {
-                const header = i === 0
-                    ? "**Your Bridge List:**\n\n"
-                    : `**Your Bridge List (Part ${i+1}):**\n\n`;
-                await message.author.send(header + chunks[i]);
+            for (let i=0;i<chunks.length;i++){
+                const header = i===0?"**Your Bridge List:**\n\n":`**Your Bridge List (Part ${i+1}):**\n\n`;
+                await message.author.send(header+chunks[i]);
             }
-
             const reply = await message.reply("✅ I've sent you the bridge list via DM!");
-            setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
-
+            setTimeout(async()=>{try{await reply.delete()}catch{}},5000);
         } catch {
-            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs from server members.`);
+            await message.channel.send(`${message.author}, I can't DM you.`);
         }
-
-        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
-    // ----------------- !viewlog command -----------------
+    // ----------------- !viewlog -----------------
     if (content.startsWith("!viewlog")) {
         let allLogs = [];
-
-        for (const userId in commandLog) {
-            const user = await client.users.fetch(userId).catch(() => null);
-            const username = user ? user.tag : userId;
-            commandLog[userId].forEach(entry => {
-                allLogs.push(`${username} → <t:${Math.floor(entry.timestamp / 1000)}:T> → ${entry.command}`);
+        for(const uid in commandLog){
+            const user = await client.users.fetch(uid).catch(()=>null);
+            const username = user?user.tag:uid;
+            commandLog[uid].forEach(entry=>{
+                allLogs.push(`${username} → <t:${Math.floor(entry.timestamp/1000)}:T> → ${entry.command}`);
             });
         }
-
-        allLogs.sort((a, b) => {
-            const timeA = parseInt(a.match(/<t:(\d+):T>/)[1]);
-            const timeB = parseInt(b.match(/<t:(\d+):T>/)[1]);
-            return timeA - timeB;
+        allLogs.sort((a,b)=>{
+            const timeA=parseInt(a.match(/<t:(\d+):T>/)[1]);
+            const timeB=parseInt(b.match(/<t:(\d+):T>/)[1]);
+            return timeA-timeB;
         });
-
-        if (allLogs.length === 0) {
-            try { await message.author.send("No commands have been logged in the last 24 hours."); }
-            catch { await message.channel.send(`${message.author}, I can't DM you.`); }
+        if(allLogs.length===0){
+            try{await message.author.send("No commands have been logged in the last 24 hours.");}
+            catch{await message.channel.send(`${message.author}, I can't DM you.`);}
             return;
         }
-
-        const chunks = splitMessage(allLogs, 1900);
-
-        try {
-            for (let i = 0; i < chunks.length; i++) {
-                const header = i === 0
-                    ? "**Command Log (last 24 hours):**\n\n"
-                    : `**Command Log (Part ${i + 1}):**\n\n`;
-                await message.author.send(header + chunks[i]);
+        const chunks = splitMessage(allLogs,1900);
+        try{
+            for(let i=0;i<chunks.length;i++){
+                const header=i===0?"**Command Log (last 24 hours):**\n\n":`**Command Log (Part ${i+1}):**\n\n`;
+                await message.author.send(header+chunks[i]);
             }
-
             const reply = await message.reply("✅ I've sent you the command log via DM!");
-            setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
-
-        } catch {
-            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs.`);
+            setTimeout(async()=>{try{await reply.delete()}catch{}},5000);
+        } catch{
+            await message.channel.send(`${message.author}, I can't DM you.`);
         }
-
-        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
-    // ----------------- Bridge link detection -----------------
+    // ----------------- Bridge detection -----------------
     const blocks = content.split(/\n\s*\n/);
     let bridgesAdded = 0;
-    for (const block of blocks) {
+    for(const block of blocks){
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if (!bridgeMatch) continue;
+        if(!bridgeMatch) continue;
 
         const link = bridgeMatch[0];
         const code = link.split("?")[1];
-        if (!code) continue;
-
+        if(!code) continue;
         const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
 
-        if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) continue;
+        if(bridgeList.some(entry=>entry.bridgeLink?.includes(code))) continue;
 
-        const structureLine = block.split("\n").find(line => line.includes(":"));
-        const displayName = structureLine
-            ? structureLine.split(":").map(s => s.trim()).join("/")
-            : "Unknown Structure";
+        const structureLine = block.split("\n").find(line=>line.includes(":"));
+        const displayName = structureLine?structureLine.split(":").map(s=>s.trim()).join("/"):"Unknown Structure";
 
         bridgeList.push({
             bridgeLink: link,
@@ -336,19 +315,16 @@ client.on("messageCreate", async (message) => {
             name: displayName,
             color: ""
         });
-
         bridgesAdded++;
     }
 
-    // Log bridge addition as a summary
-    if (bridgesAdded > 0) {
-        if (!commandLog[userId]) commandLog[userId] = [];
+    if(bridgesAdded>0){
         commandLog[userId].push({
-            command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`,
-            timestamp: now
+            command:`Added ${bridgesAdded} bridge${bridgesAdded>1?"s":""}`,
+            timestamp:now
         });
-        const dayAgo = now - 24 * 60 * 60 * 1000;
-        commandLog[userId] = commandLog[userId].filter(entry => entry.timestamp > dayAgo);
+        const dayAgo = now - 24*60*60*1000;
+        commandLog[userId]=commandLog[userId].filter(entry=>entry.timestamp>dayAgo);
         saveCommandLog();
     }
 
