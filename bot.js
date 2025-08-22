@@ -54,21 +54,22 @@ function formatBridgeList(includeVercel = true) {
     });
 }
 
-// ----------------- SPLIT INTO CHUNKS -----------------
-function splitMessage(content, maxLength = 1900) {
+// ----------------- SPLIT INTO CHUNKS (keep entries together) -----------------
+function splitMessage(entries, maxLength = 1900) {
     const chunks = [];
     let current = "";
 
-    for (const line of content) {
-        if ((current + "\n\n" + line).length > maxLength) {
-            chunks.push(current.trim());
-            current = line;
+    for (const entry of entries) {
+        const entryWithSpacing = (current ? "\n\n" : "") + entry;
+        if ((current + entryWithSpacing).length > maxLength) {
+            if (current) chunks.push(current.trim());
+            current = entry;
         } else {
-            current += (current ? "\n\n" : "") + line;
+            current += entryWithSpacing;
         }
     }
-    if (current) chunks.push(current.trim());
 
+    if (current) chunks.push(current.trim());
     return chunks;
 }
 
@@ -166,32 +167,76 @@ client.once("ready", async () => {
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-
     const content = message.content;
 
-    // DM Commands
-    if (message.channel.type === 1) {
-        if (content.startsWith("!listme")) {
-            if (bridgeList.length === 0) {
+    // Only respond in the allowed channel
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
+
+    // ----------------- !listme command -----------------
+    if (content.startsWith("!listme")) {
+        if (bridgeList.length === 0) {
+            try {
                 await message.author.send("Bridge list is currently empty.");
-                return;
+            } catch {
+                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs from server members.`);
             }
-            const entries = formatBridgeList(false);
-            const chunks = splitMessage(entries);
+            return;
+        }
+
+        // Parse range argument
+        const args = content.split(" ").slice(1);
+        let start = 0, end = bridgeList.length;
+
+        if (args.length > 0) {
+            const arg = args[0].toLowerCase();
+            if (arg !== "all") {
+                const match = arg.match(/^(\d+)-(\d+)$/);
+                if (match) {
+                    start = Math.max(0, parseInt(match[1], 10) - 1);
+                    end = Math.min(bridgeList.length, parseInt(match[2], 10));
+                }
+            }
+        }
+
+        // Prepare entries for DM (keep color emojis, no Vercel links)
+        const entries = bridgeList
+            .slice(start, end)
+            .map((b, i) => `${i + 1}. ${b.color}${b.name}\n${b.bridge}`);
+
+        if (entries.length === 0) {
+            try {
+                await message.author.send("No entries found for that range.");
+            } catch {
+                await message.channel.send(`${message.author}, I can't DM you. Please enable DMs.`);
+            }
+            return;
+        }
+
+        // Split into DM chunks safely
+        const chunks = splitMessage(entries);
+
+        try {
             for (let i = 0; i < chunks.length; i++) {
                 const header = i === 0
                     ? "**Your Bridge List:**\n\n"
                     : `**Your Bridge List (Part ${i+1}):**\n\n`;
                 await message.author.send(header + chunks[i]);
             }
+
+            // Confirm in the channel
+            const reply = await message.reply("✅ I've sent you the bridge list via DM!");
+            setTimeout(async () => { try { await reply.delete(); } catch {} }, 5000);
+
+        } catch {
+            await message.channel.send(`${message.author}, I couldn't DM you. Please enable DMs from server members.`);
         }
+
+        // Optionally delete the command message
+        setTimeout(async () => { try { await message.delete(); } catch {} }, 3000);
         return;
     }
 
-    // Guild Commands
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
-
-    // Color commands
+    // ----------------- rest of your message handler (color commands, remove, clear, etc.) -----------------
     if (/^!(red|yellow|green) \d+$/i.test(content)) {
         const [cmd, numStr] = content.split(" ");
         const num = parseInt(numStr, 10);
@@ -208,7 +253,6 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Remove
     if (content.startsWith("!remove")) {
         const num = parseInt(content.split(" ")[1]);
         if (!isNaN(num) && num >= 1 && num <= bridgeList.length) {
@@ -220,7 +264,6 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Clear the entire list
     if (content === "!clearlist") {
         bridgeList = [];
         saveBridgeList();
@@ -229,7 +272,6 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Manual resync
     if (content === "!resync") {
         try {
             const messages = await message.channel.messages.fetch({ limit: 100 });
@@ -263,7 +305,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // Bridge link detection
+    // ----------------- bridge link detection -----------------
     const blocks = content.split(/\n\s*\n/);
     for (const block of blocks) {
         const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
