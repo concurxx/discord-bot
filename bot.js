@@ -159,8 +159,6 @@ client.once("ready", async () => {
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-
-    // ✅ Only operate in the allowed channel
     if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
 
     const content = message.content;
@@ -192,7 +190,6 @@ client.on("messageCreate", async (message) => {
             bridgeList.splice(num-1,1);
             saveBridgeList();
             await updateBridgeListMessage(message.channel);
-
             commandLog[userId].push({command:content,timestamp:now});
             commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
             saveCommandLog();
@@ -207,37 +204,68 @@ client.on("messageCreate", async (message) => {
         bridgeList = [];
         saveBridgeList();
         await updateBridgeListMessage(message.channel);
-
         commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
-
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
-    // -------- !restore --------
-    if (content.startsWith("!restore")) {
-        const backupFiles = fs.readdirSync(path.join(__dirname, "data"))
+    // -------- !backups --------
+    if(content.startsWith("!backups")){
+        const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
-            .sort((a, b) => fs.statSync(path.join(__dirname, "data", b)).mtimeMs -
-                            fs.statSync(path.join(__dirname, "data", a)).mtimeMs);
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
+                            fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+        if(files.length===0){
+            await message.reply("No backups available.");
+            return;
+        }
+        const list = files.map((f,i)=>{
+            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
+            const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
+            const date = new Date(timestamp);
+            const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
+            return `[${i+1}] ${formatted} (${data.length} bridges)`;
+        }).join("\n");
+        await message.reply(`Available backups:\n${list}`);
+        return;
+    }
 
-        if (backupFiles.length === 0) {
+    // -------- !restore --------
+    if(content.startsWith("!restore")){
+        const args = content.split(" ").slice(1);
+        const files = fs.readdirSync(path.join(__dirname,"data"))
+            .filter(f => f.startsWith("bridgeList-"))
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
+                            fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+        if(files.length===0){
             await message.reply("❌ No backups available.");
             return;
         }
 
-        const latestBackup = path.join(__dirname, "data", backupFiles[0]);
-        bridgeList = JSON.parse(fs.readFileSync(latestBackup, "utf8"));
+        let chosenFile;
+        if(args.length===0){
+            chosenFile = files[0];
+        } else {
+            const idx = parseInt(args[0],10);
+            if(isNaN(idx) || idx<1 || idx>files.length){
+                await message.reply("❌ Invalid backup number.");
+                return;
+            }
+            chosenFile = files[idx-1];
+        }
+
+        const backupData = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
+        bridgeList = backupData;
         saveBridgeList();
         await updateBridgeListMessage(message.channel);
 
-        commandLog[userId].push({command:"!restore",timestamp:now});
+        commandLog[userId].push({command:`!restore`,timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
 
-        await message.reply(`✅ Bridge list restored from backup: \`${backupFiles[0]}\``);
+        await message.reply(`✅ Bridge list restored from backup: \`${chosenFile}\``);
         return;
     }
 
