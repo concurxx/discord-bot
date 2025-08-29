@@ -37,24 +37,21 @@ let lastListMessages = [];
 // ----------------- SAVE FUNCTIONS -----------------
 function saveBridgeList() {
     try {
-        const data = JSON.stringify(bridgeList, null, 2);
-        fs.writeFileSync(DATA_FILE, data, "utf8");
+        fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
 
-        // 🔹 also write a timestamped backup
-        const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
-        fs.writeFileSync(backupFile, data, "utf8");
+        // Only create timestamped backup if list has bridges
+        if(bridgeList.length > 0){
+            const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
+            fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
 
-        // 🔹 keep only the last BACKUP_LIMIT files
-        const files = fs.readdirSync(path.join(__dirname, "data"))
-            .filter(f => f.startsWith("bridgeList-"))
-            .sort((a, b) => fs.statSync(path.join(__dirname, "data", a)).mtimeMs -
-                            fs.statSync(path.join(__dirname, "data", b)).mtimeMs);
-        while (files.length > BACKUP_LIMIT) {
-            fs.unlinkSync(path.join(__dirname, "data", files.shift()));
+            // Keep only the last BACKUP_LIMIT backups
+            const files = fs.readdirSync(path.join(__dirname, "data"))
+                .filter(f => f.startsWith("bridgeList-"))
+                .sort((a, b) => fs.statSync(path.join(__dirname,"data",a)).mtimeMs -
+                                fs.statSync(path.join(__dirname,"data",b)).mtimeMs);
+            while (files.length > BACKUP_LIMIT) fs.unlinkSync(path.join(__dirname,"data",files.shift()));
         }
-    } catch (err) {
-        console.log("Error saving bridge list:", err);
-    }
+    } catch (err) { console.log("Error saving bridge list:", err); }
 }
 
 function saveCommandLog() {
@@ -104,14 +101,8 @@ async function updateBridgeListMessage(channel) {
                 await lastListMessages[0].edit("Bridge list is currently empty.");
                 for (let i = 1; i < lastListMessages.length; i++) try { await lastListMessages[i].delete(); } catch {}
                 lastListMessages = [lastListMessages[0]];
-            } catch {
-                const msg = await channel.send("Bridge list is currently empty.");
-                lastListMessages = [msg];
-            }
-        } else {
-            const msg = await channel.send("Bridge list is currently empty.");
-            lastListMessages = [msg];
-        }
+            } catch { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } }
+        } else { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } }
         return;
     }
 
@@ -122,15 +113,14 @@ async function updateBridgeListMessage(channel) {
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
             try { await lastListMessages[i].edit(header + chunks[i]); } 
-            catch { lastListMessages[i] = await channel.send(header + chunks[i]); }
+            catch { try { lastListMessages[i] = await channel.send(header + chunks[i]); } catch(err){ console.error(err); } }
         }
     } else {
         for (const msg of lastListMessages) try { await msg.delete(); } catch {}
         lastListMessages = [];
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
-            const msg = await channel.send(header + chunks[i]);
-            lastListMessages.push(msg);
+            try { const msg = await channel.send(header + chunks[i]); lastListMessages.push(msg); } catch(err){ console.error(err); }
         }
     }
 
@@ -174,7 +164,7 @@ client.on("messageCreate", async (message) => {
             let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
             bridgeList[num-1].color=color;
             saveBridgeList();
-            await updateBridgeListMessage(message.channel);
+            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         }
         commandLog[userId].push({command:content,timestamp:now});
         commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
@@ -189,7 +179,7 @@ client.on("messageCreate", async (message) => {
         if(!isNaN(num) && num>=1 && num<=bridgeList.length){
             bridgeList.splice(num-1,1);
             saveBridgeList();
-            await updateBridgeListMessage(message.channel);
+            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
             commandLog[userId].push({command:content,timestamp:now});
             commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
             saveCommandLog();
@@ -203,7 +193,7 @@ client.on("messageCreate", async (message) => {
         const count = bridgeList.length;
         bridgeList = [];
         saveBridgeList();
-        await updateBridgeListMessage(message.channel);
+        try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
@@ -218,60 +208,60 @@ client.on("messageCreate", async (message) => {
             .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
                             fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
         if(files.length===0){
-            await message.reply("No backups available.");
+            try { await message.reply("No backups available."); } catch(err){ console.error(err); }
             return;
         }
+
         const list = files.map((f,i)=>{
             const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
             const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
             const date = new Date(timestamp);
             const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
             return `[${i+1}] ${formatted} (${data.length} bridges)`;
-        }).join("\n");
-        await message.reply(`Available backups:\n${list}`);
+        });
+
+        const chunks = splitMessage(list);
+        for (const chunk of chunks) {
+            try { await message.author.send(chunk); } catch(err){ console.error(err); }
+        }
+        try { const reply = await message.reply("✅ Backup list sent via DM!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
-    // -------- !restore --------
+    // -------- !restore # --------
     if(content.startsWith("!restore")){
-        const args = content.split(" ").slice(1);
+        const arg = parseInt(content.split(" ")[1]);
+        if(isNaN(arg) || arg<1) return;
+
         const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
             .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
                             fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-        if(files.length===0){
-            await message.reply("❌ No backups available.");
-            return;
-        }
 
-        let chosenFile;
-        if(args.length===0){
-            chosenFile = files[0];
-        } else {
-            const idx = parseInt(args[0],10);
-            if(isNaN(idx) || idx<1 || idx>files.length){
-                await message.reply("❌ Invalid backup number.");
-                return;
-            }
-            chosenFile = files[idx-1];
-        }
+        if(arg>files.length) return;
+        const chosenFile = files[arg-1];
+        if(!chosenFile) return;
 
-        const backupData = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
-        bridgeList = backupData;
-        saveBridgeList();
-        await updateBridgeListMessage(message.channel);
+        try {
+            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
+            bridgeList = data;
+            saveBridgeList();
+        } catch(err){ console.error(err); return; }
 
-        commandLog[userId].push({command:`!restore`,timestamp:now});
+        try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+
+        commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
 
-        await message.reply(`✅ Bridge list restored from backup: \`${chosenFile}\``);
+        try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
         return;
     }
 
     // -------- !listme --------
     if(content.startsWith("!listme")){
-        if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{await message.channel.send(`${message.author}, I can't DM you.`)};return;}
+        if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
         const args = content.split(" ").slice(1);
         let start=0,end=bridgeList.length;
         if(args.length>0 && args[0].toLowerCase()!=="all"){
@@ -281,8 +271,8 @@ client.on("messageCreate", async (message) => {
         const entries = bridgeList.slice(start,end).map((b,i)=>`${i+1}. ${b.color}${b.name}\n${b.bridge}`);
         const chunks = splitMessage(entries);
         try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Your Bridge List:**\n\n":`**Your Bridge List (Part ${i+1}):**\n\n`)+chunks[i]);}
-            const reply=await message.reply("✅ Bridge list sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);
-        }catch{await message.channel.send(`${message.author}, I can't DM you.`);}
+            try{const reply=await message.reply("✅ Bridge list sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
+        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
@@ -296,11 +286,11 @@ client.on("messageCreate", async (message) => {
             commandLog[uid].forEach(entry=>allLogs.push(`${username} → <t:${Math.floor(entry.timestamp/1000)}:T> → ${entry.command}`));
         }
         allLogs.sort((a,b)=>parseInt(a.match(/<t:(\d+):T>/)[1])-parseInt(b.match(/<t:(\d+):T>/)[1]));
-        if(allLogs.length===0){try{await message.author.send("No commands logged in the last 24 hours");}catch{await message.channel.send(`${message.author}, I can't DM you.`)};return;}
+        if(allLogs.length===0){try{await message.author.send("No commands logged in the last 24 hours");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
         const chunks = splitMessage(allLogs,1900);
         try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Command Log (last 24h):**\n\n":`**Command Log (Part ${i+1}):**\n\n`)+chunks[i]);}
-            const reply=await message.reply("✅ Command log sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);
-        }catch{await message.channel.send(`${message.author}, I can't DM you.`);}
+            try{const reply=await message.reply("✅ Command log sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
+        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
@@ -328,7 +318,7 @@ client.on("messageCreate", async (message) => {
     }
 
     saveBridgeList();
-    await updateBridgeListMessage(message.channel);
+    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
 });
 
 // ----------------- LOGIN -----------------
