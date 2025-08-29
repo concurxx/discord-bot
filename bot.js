@@ -7,6 +7,7 @@ const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel I
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
 const COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
+const BACKUP_LIMIT = 10; // how many backups to keep
 // =========================================
 
 const client = new Client({
@@ -35,8 +36,25 @@ let lastListMessages = [];
 
 // ----------------- SAVE FUNCTIONS -----------------
 function saveBridgeList() {
-    try { fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8"); }
-    catch (err) { console.log("Error saving bridge list:", err); }
+    try {
+        const data = JSON.stringify(bridgeList, null, 2);
+        fs.writeFileSync(DATA_FILE, data, "utf8");
+
+        // 🔹 also write a timestamped backup
+        const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
+        fs.writeFileSync(backupFile, data, "utf8");
+
+        // 🔹 keep only the last BACKUP_LIMIT files
+        const files = fs.readdirSync(path.join(__dirname, "data"))
+            .filter(f => f.startsWith("bridgeList-"))
+            .sort((a, b) => fs.statSync(path.join(__dirname, "data", a)).mtimeMs -
+                            fs.statSync(path.join(__dirname, "data", b)).mtimeMs);
+        while (files.length > BACKUP_LIMIT) {
+            fs.unlinkSync(path.join(__dirname, "data", files.shift()));
+        }
+    } catch (err) {
+        console.log("Error saving bridge list:", err);
+    }
 }
 
 function saveCommandLog() {
@@ -195,6 +213,31 @@ client.on("messageCreate", async (message) => {
         saveCommandLog();
 
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    // -------- !restore --------
+    if (content.startsWith("!restore")) {
+        const backupFiles = fs.readdirSync(path.join(__dirname, "data"))
+            .filter(f => f.startsWith("bridgeList-"))
+            .sort((a, b) => fs.statSync(path.join(__dirname, "data", b)).mtimeMs -
+                            fs.statSync(path.join(__dirname, "data", a)).mtimeMs);
+
+        if (backupFiles.length === 0) {
+            await message.reply("❌ No backups available.");
+            return;
+        }
+
+        const latestBackup = path.join(__dirname, "data", backupFiles[0]);
+        bridgeList = JSON.parse(fs.readFileSync(latestBackup, "utf8"));
+        saveBridgeList();
+        await updateBridgeListMessage(message.channel);
+
+        commandLog[userId].push({command:"!restore",timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+
+        await message.reply(`✅ Bridge list restored from backup: \`${backupFiles[0]}\``);
         return;
     }
 
