@@ -56,7 +56,7 @@ function saveBridgeList() {
 
 function saveCommandLog() {
     try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
-    catch (err) { console.error("❌ Error saving command log:", err); }
+    catch (err) { console.error("❌ Error saving command log file:", err); }
 }
 
 // ----------------- FORMAT & SPLIT -----------------
@@ -149,9 +149,40 @@ client.once("ready", async () => {
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
 
     const content = message.content;
+
+    // -------- Coordinate detection (all channels except bridge channel) --------
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinate\?[\d,]+/gi)];
+        if (coordMatches.length > 0) {
+            let links = coordMatches.map(match => {
+                const coords = match[0].split("?")[1];
+                if (!coords) return null;
+                const cleanLink = `${REDIRECT_DOMAIN}/api/coord?coords=${encodeURIComponent(coords)}`;
+                return `🔗 [Open Coordinates](${cleanLink})`;
+            }).filter(Boolean);
+
+            if (links.length > 0) {
+                try {
+                    // Repost clean version with username
+                    await message.channel.send({
+                        content: `**${message.author.username} said:**\n${content}\n\n${links.join("\n")}`
+                    });
+
+                    // Safely delete ONLY the original message
+                    await message.delete().catch(err => {
+                        console.error("⚠️ Could not delete original coordinate message:", err);
+                    });
+                } catch (err) {
+                    console.error("❌ Error handling coordinate link:", err);
+                }
+            }
+        }
+    }
+
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
+
     const now = Date.now();
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
@@ -315,11 +346,10 @@ client.on("messageCreate", async (message) => {
         commandLog[userId].push({command:`Added ${bridgesAdded} bridge${bridgesAdded>1?"s":""}`,timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
+        saveBridgeList();
+        try{await updateBridgeListMessage(message.channel);}catch(err){console.error(err);}
     }
-
-    saveBridgeList();
-    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
 });
 
 // ----------------- LOGIN -----------------
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.BOT_TOKEN);
