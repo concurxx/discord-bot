@@ -151,38 +151,6 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const content = message.content;
-
-    // -------- Coordinate detection (all channels except bridge channel) --------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
-        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinate\?[\d,]+/gi)];
-        if (coordMatches.length > 0) {
-            let links = coordMatches.map(match => {
-                const coords = match[0].split("?")[1];
-                if (!coords) return null;
-                const cleanLink = `${REDIRECT_DOMAIN}/api/coord?coords=${encodeURIComponent(coords)}`;
-                return `🔗 [Open Coordinates](${cleanLink})`;
-            }).filter(Boolean);
-
-            if (links.length > 0) {
-                try {
-                    // Repost clean version with username
-                    await message.channel.send({
-                        content: `**${message.author.username} said:**\n${content}\n\n${links.join("\n")}`
-                    });
-
-                    // Safely delete ONLY the original message
-                    await message.delete().catch(err => {
-                        console.error("⚠️ Could not delete original coordinate message:", err);
-                    });
-                } catch (err) {
-                    console.error("❌ Error handling coordinate link:", err);
-                }
-            }
-        }
-    }
-
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) return;
-
     const now = Date.now();
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
@@ -236,10 +204,9 @@ client.on("messageCreate", async (message) => {
     if(content.startsWith("!backups")){
         const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
-                            fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
         if(files.length===0){
-            try { await message.reply("No backups available."); } catch(err){ console.error(err); }
+            try { await message.reply("No backups available."); } catch(err) { console.error(err); }
             return;
         }
 
@@ -267,8 +234,7 @@ client.on("messageCreate", async (message) => {
 
         const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs -
-                            fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
 
         if(arg>files.length) return;
         const chosenFile = files[arg-1];
@@ -326,7 +292,25 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // -------- Bridge detection --------
+    // -------- Coordinate detection (mirror messages) --------
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
+        if (coordMatches.length > 0) {
+            const coordLinks = coordMatches.map(m => {
+                const code = m[0].split("?")[1];
+                return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
+            }).join("\n");
+
+            const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
+            try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
+
+            // delete the original message to keep channel clean
+            try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+            return;
+        }
+    }
+
+    // -------- Bridge detection (keep existing) --------
     const blocks = content.split(/\n\s*\n/);
     let bridgesAdded=0;
     for(const block of blocks){
@@ -346,9 +330,10 @@ client.on("messageCreate", async (message) => {
         commandLog[userId].push({command:`Added ${bridgesAdded} bridge${bridgesAdded>1?"s":""}`,timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
-        saveBridgeList();
-        try{await updateBridgeListMessage(message.channel);}catch(err){console.error(err);}
     }
+
+    saveBridgeList();
+    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
 });
 
 // ----------------- LOGIN -----------------
