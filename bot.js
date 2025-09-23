@@ -292,8 +292,9 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // -------- Coordinate detection (mirror messages) --------
+    // ----------------- Coordinate and Report detection (mirror messages) -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+        // --- Coordinates ---
         const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
         if (coordMatches.length > 0) {
             const coordLinks = coordMatches.map(m => {
@@ -304,7 +305,21 @@ client.on("messageCreate", async (message) => {
             const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
             try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
 
-            // delete the original message to keep channel clean
+            try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+            return;
+        }
+
+        // --- Reports ---
+        const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
+        if (reportMatches.length > 0) {
+            const reportLinks = reportMatches.map(m => {
+                const code = m[0].split("?")[1];
+                return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
+            }).join("\n");
+
+            const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
+            try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
+
             try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
             return;
         }
