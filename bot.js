@@ -155,192 +155,180 @@ client.on("messageCreate", async (message) => {
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
 
-    // ---- COMMANDS ONLY IN ALLOWED CHANNEL ----
-    if(message.channel.id === ALLOWED_CHANNEL_ID){
-        // -------- COLOR COMMANDS --------
-        if (/^!(red|yellow|green) \d+$/i.test(content)) {
-            const [cmd,numStr] = content.split(" ");
-            const num = parseInt(numStr,10);
-            if(num>0 && num<=bridgeList.length){
-                let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
-                bridgeList[num-1].color=color;
-                saveBridgeList();
-                try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-            }
+    // ---------------- COMMANDS ----------------
+    if (/^!(red|yellow|green) \d+$/i.test(content)) {
+        const [cmd,numStr] = content.split(" ");
+        const num = parseInt(numStr,10);
+        if(num>0 && num<=bridgeList.length){
+            let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
+            bridgeList[num-1].color=color;
+            saveBridgeList();
+            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+        }
+        commandLog[userId].push({command:content,timestamp:now});
+        commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    if(content.startsWith("!remove")){
+        const num = parseInt(content.split(" ")[1]);
+        if(!isNaN(num) && num>=1 && num<=bridgeList.length){
+            bridgeList.splice(num-1,1);
+            saveBridgeList();
+            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
             commandLog[userId].push({command:content,timestamp:now});
             commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
             saveCommandLog();
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
         }
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
 
-        // -------- REMOVE COMMAND --------
-        if(content.startsWith("!remove")){
-            const num = parseInt(content.split(" ")[1]);
-            if(!isNaN(num) && num>=1 && num<=bridgeList.length){
-                bridgeList.splice(num-1,1);
-                saveBridgeList();
-                try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-                commandLog[userId].push({command:content,timestamp:now});
-                commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-                saveCommandLog();
-            }
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
+    if(content === "!clearlist"){
+        const count = bridgeList.length;
+        bridgeList = [];
+        saveBridgeList();
+        try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+        commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    if(content.startsWith("!backups")){
+        const files = fs.readdirSync(path.join(__dirname,"data"))
+            .filter(f => f.startsWith("bridgeList-"))
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+        if(files.length===0){ try { await message.reply("No backups available."); } catch{}; return; }
+
+        const list = files.map((f,i)=>{
+            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
+            const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
+            const date = new Date(timestamp);
+            const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
+            return `[${i+1}] ${formatted} (${data.length} bridges)`;
+        });
+
+        const chunks = splitMessage(list);
+        for (const chunk of chunks) {
+            try { await message.author.send(chunk); } catch(err){ console.error(err); }
         }
+        try { const reply = await message.reply("✅ Backup list sent via DM!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
 
-        // -------- CLEARLIST COMMAND --------
-        if(content === "!clearlist"){
-            const count = bridgeList.length;
-            bridgeList = [];
+    if(content.startsWith("!restore")){
+        const arg = parseInt(content.split(" ")[1]);
+        if(isNaN(arg) || arg<1) return;
+
+        const files = fs.readdirSync(path.join(__dirname,"data"))
+            .filter(f => f.startsWith("bridgeList-"))
+            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
+
+        if(arg>files.length) return;
+        const chosenFile = files[arg-1];
+        if(!chosenFile) return;
+
+        try {
+            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
+            bridgeList = data;
             saveBridgeList();
-            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-            commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
-            commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-            saveCommandLog();
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
-        }
+        } catch(err){ console.error(err); return; }
 
-        // -------- !backups --------
-        if(content.startsWith("!backups")){
-            const files = fs.readdirSync(path.join(__dirname,"data"))
-                .filter(f => f.startsWith("bridgeList-"))
-                .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-            if(files.length===0){
-                try { await message.reply("No backups available."); } catch(err) { console.error(err); }
-                return;
-            }
+        try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
 
-            const list = files.map((f,i)=>{
-                const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
-                const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
-                const date = new Date(timestamp);
-                const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
-                return `[${i+1}] ${formatted} (${data.length} bridges)`;
-            });
+        commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
 
-            const chunks = splitMessage(list);
-            for (const chunk of chunks) {
-                try { await message.author.send(chunk); } catch(err){ console.error(err); }
-            }
-            try { const reply = await message.reply("✅ Backup list sent via DM!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
-        }
-
-        // -------- !restore # --------
-        if(content.startsWith("!restore")){
-            const arg = parseInt(content.split(" ")[1]);
-            if(isNaN(arg) || arg<1) return;
-
-            const files = fs.readdirSync(path.join(__dirname,"data"))
-                .filter(f => f.startsWith("bridgeList-"))
-                .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-
-            if(arg>files.length) return;
-            const chosenFile = files[arg-1];
-            if(!chosenFile) return;
-
-            try {
-                const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
-                bridgeList = data;
-                saveBridgeList();
-            } catch(err){ console.error(err); return; }
-
-            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-
-            commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
-            commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-            saveCommandLog();
-
-            try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
-            return;
-        }
-
-        // -------- !listme --------
-        if(content.startsWith("!listme")){
-            if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
-            const args = content.split(" ").slice(1);
-            let start=0,end=bridgeList.length;
-            if(args.length>0 && args[0].toLowerCase()!=="all"){
-                const match=args[0].match(/^(\d+)-(\d+)$/);
-                if(match){start=Math.max(0,parseInt(match[1],10)-1);end=Math.min(bridgeList.length,parseInt(match[2],10));}
-            }
-            const entries = bridgeList.slice(start,end).map((b,i)=>`${i+1}. ${b.color}${b.name}\n${b.bridge}`);
-            const chunks = splitMessage(entries);
-            try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Your Bridge List:**\n\n":`**Your Bridge List (Part ${i+1}):**\n\n`)+chunks[i]);}
-                try{const reply=await message.reply("✅ Bridge list sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
-            }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
-        }
-
-        // -------- !viewlog --------
-        if(content.startsWith("!viewlog")){
-            let allLogs=[];
-            for(const uid in commandLog){
-                const user = await client.users.fetch(uid).catch(()=>null);
-                const username = user?user.tag:uid;
-                commandLog[uid].forEach(entry=>allLogs.push(`${username} → <t:${Math.floor(entry.timestamp/1000)}:T> → ${entry.command}`));
-            }
-            allLogs.sort((a,b)=>parseInt(a.match(/<t:(\d+):T>/)[1])-parseInt(b.match(/<t:(\d+):T>/)[1]));
-            if(allLogs.length===0){try{await message.author.send("No commands logged in the last 24 hours");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
-            const chunks = splitMessage(allLogs,1900);
-            try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Command Log (last 24h):**\n\n":`**Command Log (Part ${i+1}):**\n\n`)+chunks[i]);}
-                try{const reply=await message.reply("✅ Command log sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
-            }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-            return;
-        }
-    } // end ALLOWED_CHANNEL_ID commands
-
-// ----------------- Coordinate, Report, and Player detection (mirror messages) -----------------
-if (message.channel.id !== ALLOWED_CHANNEL_ID) {
-    // --- Coordinates ---
-    const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
-    if (coordMatches.length > 0) {
-        const coordLinks = coordMatches.map(m => {
-            const code = m[0].split("?")[1];
-            return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
-        }).join("\n");
-
-        const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
-        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+        try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
         return;
     }
 
-    // --- Reports ---
-    const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
-    if (reportMatches.length > 0) {
-        const reportLinks = reportMatches.map(m => {
-            const code = m[0].split("?")[1];
-            return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
-        }).join("\n");
-
-        const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
-        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+    if(content.startsWith("!listme")){
+        if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
+        const args = content.split(" ").slice(1);
+        let start=0,end=bridgeList.length;
+        if(args.length>0 && args[0].toLowerCase()!=="all"){
+            const match=args[0].match(/^(\d+)-(\d+)$/);
+            if(match){start=Math.max(0,parseInt(match[1],10)-1);end=Math.min(bridgeList.length,parseInt(match[2],10));}
+        }
+        const entries = bridgeList.slice(start,end).map((b,i)=>`${i+1}. ${b.color}${b.name}\n${b.bridge}`);
+        const chunks = splitMessage(entries);
+        try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Your Bridge List:**\n\n":`**Your Bridge List (Part ${i+1}):**\n\n`)+chunks[i]);}
+            try{const reply=await message.reply("✅ Bridge list sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
+        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
-    // --- Players ---
-    const playerMatches = [...content.matchAll(/l\+k:\/\/player\?[\d,&]+/gi)];
-    if (playerMatches.length > 0) {
-        const playerLinks = playerMatches.map(m => {
-            const code = m[0].split("?")[1];
-            return `[Click to view player](${REDIRECT_DOMAIN}/api/player?code=${encodeURIComponent(code)})`;
-        }).join("\n");
-
-        const mirrored = `**${message.author.username}:**\n${content}\n\n${playerLinks}`;
-        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored player message:", err); }
-        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+    if(content.startsWith("!viewlog")){
+        let allLogs=[];
+        for(const uid in commandLog){
+            const user = await client.users.fetch(uid).catch(()=>null);
+            const username = user?user.tag:uid;
+            commandLog[uid].forEach(entry=>allLogs.push(`${username} → <t:${Math.floor(entry.timestamp/1000)}:T> → ${entry.command}`));
+        }
+        allLogs.sort((a,b)=>parseInt(a.match(/<t:(\d+):T>/)[1])-parseInt(b.match(/<t:(\d+):T>/)[1]));
+        if(allLogs.length===0){try{await message.author.send("No commands logged in the last 24 hours");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
+        const chunks = splitMessage(allLogs,1900);
+        try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Command Log (last 24h):**\n\n":`**Command Log (Part ${i+1}):**\n\n`)+chunks[i]);}
+            try{const reply=await message.reply("✅ Command log sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
+        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
-}
 
-    // -------- Bridge detection (keep existing) --------
+    // ----------------- Mirror Messages -----------------
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+        // --- Coordinates ---
+        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
+        if (coordMatches.length > 0) {
+            const coordLinks = coordMatches.map(m => {
+                const code = m[0].split("?")[1];
+                return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
+            }).join("\n");
+
+            const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
+            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
+            try { await message.delete(); } catch(err) { console.error(err); }
+            return;
+        }
+
+        // --- Reports ---
+        const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
+        if (reportMatches.length > 0) {
+            const reportLinks = reportMatches.map(m => {
+                const code = m[0].split("?")[1];
+                return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
+            }).join("\n");
+
+            const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
+            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
+            try { await message.delete(); } catch(err) { console.error(err); }
+            return;
+        }
+
+        // --- Players ---
+        const playerMatches = [...content.matchAll(/l\+k:\/\/player\?[\d,&]+/gi)];
+        if (playerMatches.length > 0) {
+            const playerLinks = playerMatches.map(m => {
+                const code = m[0].split("?")[1];
+                return `[Click to view player](${REDIRECT_DOMAIN}/api/player?code=${encodeURIComponent(code)})`;
+            }).join("\n");
+
+            const mirrored = `**${message.author.username}:**\n${content}\n\n${playerLinks}`;
+            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
+            try { await message.delete(); } catch(err) { console.error(err); }
+            return;
+        }
+    }
+
+    // ----------------- Bridge detection -----------------
     const blocks = content.split(/\n\s*\n/);
     let bridgesAdded=0;
     for(const block of blocks){
