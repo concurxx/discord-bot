@@ -295,38 +295,50 @@ client.on("messageCreate", async (message) => {
         }
     } // end ALLOWED_CHANNEL_ID commands
 
-    // ----------------- Coordinate and Report detection (mirror messages) -----------------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
-        // --- Coordinates ---
-        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
-        if (coordMatches.length > 0) {
-            const coordLinks = coordMatches.map(m => {
-                const code = m[0].split("?")[1];
-                return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
-            }).join("\n");
+// ----------------- Coordinate, Report, and Player detection (mirror messages) -----------------
+if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+    // --- Coordinates ---
+    const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
+    if (coordMatches.length > 0) {
+        const coordLinks = coordMatches.map(m => {
+            const code = m[0].split("?")[1];
+            return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
+        }).join("\n");
 
-            const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
-            try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-
-            try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
-            return;
-        }
-
-        // --- Reports ---
-        const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
-        if (reportMatches.length > 0) {
-            const reportLinks = reportMatches.map(m => {
-                const code = m[0].split("?")[1];
-                return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
-            }).join("\n");
-
-            const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
-            try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-
-            try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
-            return;
-        }
+        const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
+        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
+        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+        return;
     }
+
+    // --- Reports ---
+    const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
+    if (reportMatches.length > 0) {
+        const reportLinks = reportMatches.map(m => {
+            const code = m[0].split("?")[1];
+            return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
+        }).join("\n");
+
+        const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
+        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
+        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+        return;
+    }
+
+    // --- Players ---
+    const playerMatches = [...content.matchAll(/l\+k:\/\/player\?[\d,&]+/gi)];
+    if (playerMatches.length > 0) {
+        const playerLinks = playerMatches.map(m => {
+            const code = m[0].split("?")[1];
+            return `[Click to view player](${REDIRECT_DOMAIN}/api/player?code=${encodeURIComponent(code)})`;
+        }).join("\n");
+
+        const mirrored = `**${message.author.username}:**\n${content}\n\n${playerLinks}`;
+        try { await message.channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored player message:", err); }
+        try { await message.delete(); } catch(err) { console.error("❌ Error deleting user message:", err); }
+        return;
+    }
+}
 
     // -------- Bridge detection (keep existing) --------
     const blocks = content.split(/\n\s*\n/);
