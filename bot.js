@@ -1,39 +1,201 @@
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const fs = require("fs");
-const path = require("path");
-
-// ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
-const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
-const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
-const COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
-const BACKUP_LIMIT = 10; // how many backups to keep
-// =========================================
+// bot.js
+const { Client, GatewayIntentBits } = require("discord.js");
+require("dotenv").config();
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
-// Ensure data folder exists
-if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirname, "data"));
-
-// Load bridge list
+const PREFIX = "!";
+const ALLOWED_CHANNEL_ID = "YOUR_LIST_CHANNEL_ID"; // <-- replace with your bridge list channel
 let bridgeList = [];
-try { if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } 
-catch (err) { console.log("Error reading bridge list file:", err); }
-
-// Load command log
-let commandLog = {};
-try { if (fs.existsSync(COMMAND_LOG_FILE)) commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8")); } 
-catch (err) { console.error("❌ Error reading command log file:", err); }
-
 let lastListMessages = [];
 
+// --- Utilities ---
+function formatBridgeList(includeLinks = false) {
+  return bridgeList
+    .map(
+      (bridge, i) =>
+        `${i + 1}. ${bridge.name} - ${bridge.coords}${
+          includeLinks ? ` (<${bridge.link}>)` : ""
+        }`
+    )
+    .join("\n");
+}
+
+function splitMessage(text, maxLength = 1900) {
+  const lines = text.split("\n");
+  const chunks = [];
+  let current = "";
+
+  for (const line of lines) {
+    if (current.length + line.length + 1 > maxLength) {
+      chunks.push(current);
+      current = "";
+    }
+    current += line + "\n";
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+// --- Safe Cleanup ---
+async function cleanChannel(channel) {
+  if (channel.id !== ALLOWED_CHANNEL_ID) return; // ✅ safeguard
+  try {
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const toDelete = messages.filter(
+      (m) =>
+        m.author.id === channel.client.user.id &&
+        !lastListMessages.some((l) => l.id === m.id)
+    );
+    if (toDelete.size > 0) {
+      await channel.bulkDelete(toDelete, true);
+    }
+  } catch (err) {
+    console.error("❌ Error cleaning channel:", err);
+  }
+}
+
+// --- Update bridge list safely ---
+async function updateBridgeListMessage(channel) {
+  if (channel.id !== ALLOWED_CHANNEL_ID) return; // ✅ only in allowed channel
+
+  if (bridgeList.length === 0) {
+    for (const msg of lastListMessages) {
+      try {
+        await msg.delete();
+      } catch {}
+    }
+    lastListMessages = [];
+    return;
+  }
+
+  const entries = formatBridgeList(true);
+  const chunks = splitMessage(entries);
+
+  if (chunks.length === lastListMessages.length) {
+    for (let i = 0; i < chunks.length; i++) {
+      const header =
+        i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i + 1}):**\n\n`;
+      try {
+        await lastListMessages[i].edit(header + chunks[i]);
+      } catch {
+        try {
+          lastListMessages[i] = await channel.send(header + chunks[i]);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+  } else {
+    for (const msg of lastListMessages) {
+      try {
+        await msg.delete();
+      } catch {}
+    }
+    lastListMessages = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const header =
+        i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i + 1}):**\n\n`;
+      try {
+        const msg = await channel.send(header + chunks[i]);
+        lastListMessages.push(msg);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+
+  await cleanChannel(channel); // ✅ safe cleanup
+}
+
+// --- Bot events ---
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  // ✅ Special rule: everything a user types in ALLOWED_CHANNEL_ID gets removed
+  if (message.channel.id === ALLOWED_CHANNEL_ID) {
+    const content = message.content.trim();
+
+    // If it's a command, process it first
+    if (content.startsWith(PREFIX)) {
+      const [cmd, ...args] = content.slice(PREFIX.length).trim().split(/\s+/);
+
+      if (cmd === "add") {
+        const name = args[0];
+        const coords = args[1];
+        if (name && coords) {
+          const link = `https://map.example.com/?coords=${coords}`;
+          bridgeList.push({ name, coords, link });
+          await updateBridgeListMessage(message.channel);
+        }
+      }
+
+      if (cmd === "remove") {
+        const index = parseInt(args[0], 10) - 1;
+        if (!isNaN(index) && bridgeList[index]) {
+          bridgeList.splice(index, 1);
+          await updateBridgeListMessage(message.channel);
+        }
+      }
+
+      if (cmd === "clearlist") {
+        bridgeList = [];
+        await updateBridgeListMessage(message.channel);
+      }
+
+      if (cmd === "listme") {
+        const entries = formatBridgeList();
+        if (!entries) {
+          await message.author.send("Bridge list is empty.");
+        } else {
+          const chunks = splitMessage(entries);
+          for (const chunk of chunks) {
+            try {
+              await message.author.send(chunk);
+            } catch (err) {
+              console.error("❌ Error DMing user:", err);
+            }
+          }
+        }
+      }
+    }
+
+    // Delete *any* user message in the allowed channel (command or random text)
+    try {
+      await message.delete();
+    } catch (err) {
+      console.error("❌ Error deleting user message in list channel:", err);
+    }
+    return; // stop further processing
+  }
+
+  // ✅ In other channels, mirror coords + delete original
+  if (message.content.includes(",")) {
+    const coords = message.content.trim();
+    const link = `https://map.example.com/?coords=${coords}`;
+    try {
+      await message.channel.send(
+        `${message.author} posted coords: ${coords} → ${link}`
+      );
+      await message.delete();
+    } catch (err) {
+      console.error("❌ Error mirroring coords:", err);
+    }
+    return;
+  }
+});
+
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+client.login(process.env.BOT_TOKEN);
 // ----------------- SAVE FUNCTIONS -----------------
 function saveBridgeList() {
     try {
