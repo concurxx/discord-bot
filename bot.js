@@ -359,8 +359,17 @@ if (bridgesAdded > 0) {
     saveBridgeList();
 
     // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
+    console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed ID: ${ALLOWED_CHANNEL_ID}, Match: ${message.channel.id === ALLOWED_CHANNEL_ID}`);
     if (message.channel.id === ALLOWED_CHANNEL_ID) {
-        try { await message.delete(); } catch (err) { console.error("❌ Error deleting user bridge message:", err); }
+        console.log(`🗑️ Attempting to delete user message with bridge link`);
+        try { 
+            await message.delete(); 
+            console.log(`✅ Successfully deleted user bridge message`);
+        } catch (err) { 
+            console.error("❌ Error deleting user bridge message:", err); 
+        }
+    } else {
+        console.log(`ℹ️ Not deleting message - not in allowed channel`);
     }
     
     // Only update bridge list if bridges were actually added
