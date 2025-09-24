@@ -39,12 +39,10 @@ function saveBridgeList() {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
 
-        // Only create timestamped backup if list has bridges
         if(bridgeList.length > 0){
             const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
             fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
 
-            // Keep only the last BACKUP_LIMIT backups
             const files = fs.readdirSync(path.join(__dirname, "data"))
                 .filter(f => f.startsWith("bridgeList-"))
                 .sort((a, b) => fs.statSync(path.join(__dirname,"data",a)).mtimeMs -
@@ -89,7 +87,7 @@ function splitMessage(entries, maxLength = 1900) {
 async function cleanChannel(channel) {
     try {
         const messages = await channel.messages.fetch({ limit: 100 });
-        const toDelete = messages.filter(m => !lastListMessages.some(l => l.id === m.id));
+        const toDelete = messages.filter(m => !lastListMessages.some(l => l.id === m.id) && m.author.id === client.user.id);
         if (toDelete.size > 0) await channel.bulkDelete(toDelete, true);
     } catch (err) { console.error("❌ Error cleaning channel:", err); }
 }
@@ -155,7 +153,14 @@ client.on("messageCreate", async (message) => {
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
 
-    // ---------------- COMMANDS ----------------
+    // ----------------- COMMANDS -----------------
+    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|backups|restore|listme|viewlog)/i.test(content)) {
+        try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    // -------- COLOR COMMANDS --------
     if (/^!(red|yellow|green) \d+$/i.test(content)) {
         const [cmd,numStr] = content.split(" ");
         const num = parseInt(numStr,10);
@@ -172,6 +177,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- REMOVE --------
     if(content.startsWith("!remove")){
         const num = parseInt(content.split(" ")[1]);
         if(!isNaN(num) && num>=1 && num<=bridgeList.length){
@@ -186,6 +192,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- CLEARLIST --------
     if(content === "!clearlist"){
         const count = bridgeList.length;
         bridgeList = [];
@@ -198,12 +205,15 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- BACKUPS --------
     if(content.startsWith("!backups")){
         const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
             .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-        if(files.length===0){ try { await message.reply("No backups available."); } catch{}; return; }
-
+        if(files.length===0){
+            try { await message.reply("No backups available."); } catch(err) { console.error(err); }
+            return;
+        }
         const list = files.map((f,i)=>{
             const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
             const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
@@ -211,44 +221,37 @@ client.on("messageCreate", async (message) => {
             const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
             return `[${i+1}] ${formatted} (${data.length} bridges)`;
         });
-
         const chunks = splitMessage(list);
-        for (const chunk of chunks) {
-            try { await message.author.send(chunk); } catch(err){ console.error(err); }
-        }
+        for (const chunk of chunks) { try { await message.author.send(chunk); } catch(err){ console.error(err); } }
         try { const reply = await message.reply("✅ Backup list sent via DM!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
+    // -------- RESTORE --------
     if(content.startsWith("!restore")){
         const arg = parseInt(content.split(" ")[1]);
         if(isNaN(arg) || arg<1) return;
-
         const files = fs.readdirSync(path.join(__dirname,"data"))
             .filter(f => f.startsWith("bridgeList-"))
             .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-
         if(arg>files.length) return;
         const chosenFile = files[arg-1];
         if(!chosenFile) return;
-
         try {
             const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
             bridgeList = data;
             saveBridgeList();
         } catch(err){ console.error(err); return; }
-
         try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-
         commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
-
         try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
         return;
     }
 
+    // -------- LISTME --------
     if(content.startsWith("!listme")){
         if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};return;}
         const args = content.split(" ").slice(1);
@@ -266,6 +269,7 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- VIEWLOG --------
     if(content.startsWith("!viewlog")){
         let allLogs=[];
         for(const uid in commandLog){
@@ -283,52 +287,31 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // ----------------- Mirror Messages -----------------
+    // ----------------- MIRROR MESSAGES -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID) {
-        // --- Coordinates ---
-        const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
-        if (coordMatches.length > 0) {
-            const coordLinks = coordMatches.map(m => {
-                const code = m[0].split("?")[1];
-                return `[Click to view coordinates](${REDIRECT_DOMAIN}/api/coord?code=${encodeURIComponent(code)})`;
-            }).join("\n");
+        const mirrorTypes = [
+            {regex:/l\+k:\/\/coordinates?\?[\d,&]+/gi, api:"coord", label:"coordinates"},
+            {regex:/l\+k:\/\/report\?[\d,&]+/gi, api:"report", label:"report"},
+            {regex:/l\+k:\/\/player\?[\d,&]+/gi, api:"player", label:"player"}
+        ];
 
-            const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
-            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
-            try { await message.delete(); } catch(err) { console.error(err); }
-            return;
-        }
+        for(const type of mirrorTypes){
+            const matches = [...content.matchAll(type.regex)];
+            if(matches.length>0){
+                const links = matches.map(m=>{
+                    const code = m[0].split("?")[1];
+                    return `[Click to view ${type.label}](${REDIRECT_DOMAIN}/api/${type.api}?code=${encodeURIComponent(code)})`;
+                }).join("\n");
 
-        // --- Reports ---
-        const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
-        if (reportMatches.length > 0) {
-            const reportLinks = reportMatches.map(m => {
-                const code = m[0].split("?")[1];
-                return `[Click to view report](${REDIRECT_DOMAIN}/api/report?code=${encodeURIComponent(code)})`;
-            }).join("\n");
-
-            const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
-            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
-            try { await message.delete(); } catch(err) { console.error(err); }
-            return;
-        }
-
-        // --- Players ---
-        const playerMatches = [...content.matchAll(/l\+k:\/\/player\?[\d,&]+/gi)];
-        if (playerMatches.length > 0) {
-            const playerLinks = playerMatches.map(m => {
-                const code = m[0].split("?")[1];
-                return `[Click to view player](${REDIRECT_DOMAIN}/api/player?code=${encodeURIComponent(code)})`;
-            }).join("\n");
-
-            const mirrored = `**${message.author.username}:**\n${content}\n\n${playerLinks}`;
-            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
-            try { await message.delete(); } catch(err) { console.error(err); }
-            return;
+                const mirrored = `**${message.author.username}:**\n${content}\n\n${links}`;
+                try { await message.channel.send(mirrored); } catch(err){ console.error(`❌ Error sending mirrored ${type.label} message:`, err); }
+                try { await message.delete(); } catch(err){ console.error(`❌ Error deleting user message:`, err); }
+                return;
+            }
         }
     }
 
-    // ----------------- Bridge detection -----------------
+    // ----------------- BRIDGE DETECTION -----------------
     const blocks = content.split(/\n\s*\n/);
     let bridgesAdded=0;
     for(const block of blocks){
