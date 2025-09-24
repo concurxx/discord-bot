@@ -311,31 +311,36 @@ client.on("messageCreate", async (message) => {
         }
     }
 
-    // ----------------- BRIDGE DETECTION -----------------
-    const blocks = content.split(/\n\s*\n/);
-    let bridgesAdded=0;
-    for(const block of blocks){
-        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if(!bridgeMatch) continue;
-        const link=bridgeMatch[0];
-        const code=link.split("?")[1];
-        if(!code) continue;
-        const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-        if(bridgeList.some(entry=>entry.bridgeLink?.includes(code))) continue;
-        const structureLine=block.split("\n").find(line=>line.includes(":"));
-        const displayName = structureLine?structureLine.split(":").map(s=>s.trim()).join("/"):"Unknown Structure";
-        bridgeList.push({bridgeLink:link,vercelLink,bridge:link,vercel:vercelLink,name:displayName,color:""});
-        bridgesAdded++;
-    }
-    if(bridgesAdded>0){
-        commandLog[userId].push({command:`Added ${bridgesAdded} bridge${bridgesAdded>1?"s":""}`,timestamp:now});
-        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
-    }
+// ----------------- BRIDGE DETECTION -----------------
+const blocks = content.split(/\n\s*\n/);
+let bridgesAdded = 0;
+for (const block of blocks) {
+    const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+    if (!bridgeMatch) continue;
+    const link = bridgeMatch[0];
+    const code = link.split("?")[1];
+    if (!code) continue;
+    const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+    if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) continue;
+    const structureLine = block.split("\n").find(line => line.includes(":"));
+    const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+    bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
+    bridgesAdded++;
+}
 
-    saveBridgeList();
-    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-});
+if (bridgesAdded > 0) {
+    commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
+    commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+    saveCommandLog();
+
+    // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
+    if (message.channel.id === ALLOWED_CHANNEL_ID) {
+        try { await message.delete(); } catch (err) { console.error("❌ Error deleting user bridge message:", err); }
+    }
+}
+
+saveBridgeList();
+try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
 
 // ----------------- LOGIN -----------------
 client.login(process.env.BOT_TOKEN);
