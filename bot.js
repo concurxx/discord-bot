@@ -86,9 +86,30 @@ function splitMessage(entries, maxLength = 1900) {
 // ----------------- CLEAN & UPDATE -----------------
 async function cleanChannel(channel) {
     try {
-        const messages = await channel.messages.fetch({ limit: 100 });
-        const toDelete = messages.filter(m => !lastListMessages.some(l => l.id === m.id) && m.author.id === client.user.id);
-        if (toDelete.size > 0) await channel.bulkDelete(toDelete, true);
+        // Only clean if we have valid list messages to preserve
+        if (lastListMessages.length === 0) return;
+        
+        // Fetch recent messages (limit to 50 to be safer)
+        const messages = await channel.messages.fetch({ limit: 50 });
+        
+        // Only delete bot messages that are NOT in lastListMessages and are NEWER than 5 minutes (safety window)
+        const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+        const toDelete = messages.filter(m => 
+            m.author.id === client.user.id && 
+            !lastListMessages.some(l => l.id === m.id) &&
+            m.createdTimestamp > fiveMinutesAgo &&
+            (m.content.startsWith("**Bridge List") || m.content === "Bridge list is currently empty.")
+        );
+        
+        // Safety check: don't delete more than 10 messages at once
+        if (toDelete.size > 10) {
+            console.log(`⚠️ Attempted to delete ${toDelete.size} messages, limiting to 10 for safety`);
+            const limitedDelete = toDelete.first(10);
+            await channel.bulkDelete(limitedDelete, true);
+        } else if (toDelete.size > 0) {
+            console.log(`🧹 Cleaning ${toDelete.size} recent duplicate bridge list messages`);
+            await channel.bulkDelete(toDelete, true);
+        }
     } catch (err) { console.error("❌ Error cleaning channel:", err); }
 }
 
@@ -122,7 +143,10 @@ async function updateBridgeListMessage(channel) {
         }
     }
 
-    await cleanChannel(channel);
+    // Only clean channel occasionally, not on every update
+    if (Math.random() < 0.1) { // 10% chance to clean
+        await cleanChannel(channel);
+    }
 }
 
 // ----------------- BOT READY -----------------
@@ -332,15 +356,20 @@ if (bridgesAdded > 0) {
     commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
     commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
     saveCommandLog();
+    saveBridgeList();
 
     // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
     if (message.channel.id === ALLOWED_CHANNEL_ID) {
         try { await message.delete(); } catch (err) { console.error("❌ Error deleting user bridge message:", err); }
     }
+    
+    // Only update bridge list if bridges were actually added
+    try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
+} else {
+    // Don't update the bridge list or save if no bridges were added
+    return;
 }
-
-saveBridgeList();
-try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
+});
 
 // ----------------- LOGIN -----------------
 client.login(process.env.BOT_TOKEN);
