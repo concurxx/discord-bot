@@ -24,19 +24,13 @@ if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirna
 
 // Load bridge list
 let bridgeList = [];
-try { 
-    if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); 
-} catch (err) { 
-    console.log("Error reading bridge list file:", err); 
-}
+try { if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } 
+catch (err) { console.log("Error reading bridge list file:", err); }
 
 // Load command log
 let commandLog = {};
-try { 
-    if (fs.existsSync(COMMAND_LOG_FILE)) commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8")); 
-} catch (err) { 
-    console.error("❌ Error reading command log file:", err); 
-}
+try { if (fs.existsSync(COMMAND_LOG_FILE)) commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8")); } 
+catch (err) { console.error("❌ Error reading command log file:", err); }
 
 let lastListMessages = [];
 
@@ -88,10 +82,11 @@ function splitMessage(entries, maxLength = 1900) {
     if (current) chunks.push(current.trim());
     return chunks;
 }
+
 // ----------------- CLEAN & UPDATE -----------------
 async function cleanChannel(channel) {
-    if(channel.id !== ALLOWED_CHANNEL_ID) return; // Only clean allowed channel
     try {
+        if (channel.id !== ALLOWED_CHANNEL_ID) return; // safety
         const messages = await channel.messages.fetch({ limit: 100 });
         const toDelete = messages.filter(m => !lastListMessages.some(l => l.id === m.id));
         if (toDelete.size > 0) await channel.bulkDelete(toDelete, true);
@@ -99,54 +94,39 @@ async function cleanChannel(channel) {
 }
 
 async function updateBridgeListMessage(channel) {
-    if (bridgeList.length === 0) {
-        if (lastListMessages.length > 0) {
-            try {
-                await lastListMessages[0].edit("Bridge list is currently empty.");
-                for (let i = 1; i < lastListMessages.length; i++) try { await lastListMessages[i].delete(); } catch {}
-                lastListMessages = [lastListMessages[0]];
-            } catch { 
-                try { 
-                    const msg = await channel.send("Bridge list is currently empty."); 
-                    lastListMessages = [msg]; 
-                } catch(err){ console.error(err); } 
-            }
-        } else { 
-            try { 
-                const msg = await channel.send("Bridge list is currently empty."); 
-                lastListMessages = [msg]; 
-            } catch(err){ console.error(err); } 
-        }
-        return;
-    }
+    try {
+        if (channel.id !== ALLOWED_CHANNEL_ID) return; // safety
 
-    const entries = formatBridgeList(true);
-    const chunks = splitMessage(entries);
-
-    if (chunks.length === lastListMessages.length) {
-        for (let i = 0; i < chunks.length; i++) {
-            const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
-            try { 
-                await lastListMessages[i].edit(header + chunks[i]); 
-            } catch { 
-                try { 
-                    lastListMessages[i] = await channel.send(header + chunks[i]); 
-                } catch(err){ console.error(err); } 
+        if (bridgeList.length === 0) {
+            if (lastListMessages.length > 0) {
+                try {
+                    await lastListMessages[0].edit("Bridge list is currently empty.");
+                    for (let i = 1; i < lastListMessages.length; i++) try { await lastListMessages[i].delete(); } catch {}
+                    lastListMessages = [lastListMessages[0]];
+                } catch { 
+                    try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } 
+                }
+            } else { 
+                try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } 
             }
+            return;
         }
-    } else {
+
+        const entries = formatBridgeList(true);
+        const chunks = splitMessage(entries);
+
         for (const msg of lastListMessages) try { await msg.delete(); } catch {}
         lastListMessages = [];
+
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
-            try { 
-                const msg = await channel.send(header + chunks[i]); 
-                lastListMessages.push(msg); 
-            } catch(err){ console.error(err); }
+            try { const msg = await channel.send(header + chunks[i]); lastListMessages.push(msg); } catch(err){ console.error(err); }
         }
-    }
 
-    await cleanChannel(channel);
+        await cleanChannel(channel);
+    } catch (err) {
+        console.error("❌ Error updating bridge list message:", err);
+    }
 }
 
 // ----------------- BOT READY -----------------
@@ -155,171 +135,103 @@ client.once("ready", async () => {
     try {
         const channel = await client.channels.fetch(ALLOWED_CHANNEL_ID);
         if (!channel) return console.error("❌ Could not find channel for bridge list");
-
-        const messages = await channel.messages.fetch({ limit: 100 });
-        const listMessages = messages
-            .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
-            .sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
-
-        if (listMessages.size > 0) {
-            lastListMessages = Array.from(listMessages.values());
-            await updateBridgeListMessage(channel);
-        } else {
-            await updateBridgeListMessage(channel);
-        }
+        await updateBridgeListMessage(channel);
     } catch (err) { console.error("❌ Error during startup sync:", err); }
 });
+
 // ----------------- MESSAGE HANDLER -----------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
-
     const content = message.content;
     const now = Date.now();
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
 
-    const channel = message.channel;
-
-    // -------- COLOR COMMANDS --------
-    if (/^!(red|yellow|green) \d+$/i.test(content)) {
-        const [cmd,numStr] = content.split(" ");
-        const num = parseInt(numStr,10);
-        if(num>0 && num<=bridgeList.length){
-            let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
-            bridgeList[num-1].color=color;
-            saveBridgeList();
-            try { await updateBridgeListMessage(channel); } catch(err){ console.error(err); }
+    // ================= COMMANDS (allowed channel only) =================
+    if (message.channel.id === ALLOWED_CHANNEL_ID) {
+        if (content.startsWith("!red") || content.startsWith("!yellow") || content.startsWith("!green")) {
+            const color = content.startsWith("!red") ? "🔴" : content.startsWith("!yellow") ? "🟡" : "🟢";
+            const index = parseInt(content.split(" ")[1]) - 1;
+            if (index >= 0 && index < bridgeList.length) {
+                bridgeList[index].color = color;
+                saveBridgeList();
+                await updateBridgeListMessage(message.channel);
+            }
         }
-        commandLog[userId].push({command:content,timestamp:now});
-        commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
-        if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
 
-    // -------- REMOVE COMMAND --------
-    if(content.startsWith("!remove")){
-        const num = parseInt(content.split(" ")[1]);
-        if(!isNaN(num) && num>=1 && num<=bridgeList.length){
-            bridgeList.splice(num-1,1);
+        if (content.startsWith("!remove")) {
+            const index = parseInt(content.split(" ")[1]) - 1;
+            if (index >= 0 && index < bridgeList.length) {
+                bridgeList.splice(index, 1);
+                saveBridgeList();
+                await updateBridgeListMessage(message.channel);
+            }
+        }
+
+        if (content.startsWith("!clearlist")) {
+            bridgeList = [];
             saveBridgeList();
-            try { await updateBridgeListMessage(channel); } catch(err){ console.error(err); }
-            commandLog[userId].push({command:content,timestamp:now});
-            commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+            await updateBridgeListMessage(message.channel);
+        }
+
+        if (content.startsWith("!backups")) {
+            const files = fs.readdirSync(path.join(__dirname, "data")).filter(f => f.startsWith("bridgeList-"));
+            await message.channel.send("Backups:\n" + files.join("\n"));
+        }
+
+        if (content.startsWith("!restore")) {
+            const filename = content.split(" ")[1];
+            const filePath = path.join(__dirname, "data", filename);
+            if (fs.existsSync(filePath)) {
+                bridgeList = JSON.parse(fs.readFileSync(filePath, "utf8"));
+                saveBridgeList();
+                await updateBridgeListMessage(message.channel);
+            }
+        }
+
+        if (content.startsWith("!listme")) {
+            const entries = formatBridgeList(false);
+            const chunks = splitMessage(entries);
+            for (const chunk of chunks) {
+                await message.author.send(chunk);
+            }
+        }
+
+        if (content.startsWith("!viewlog")) {
+            const logs = commandLog[userId] || [];
+            const lines = logs.map(l => `${new Date(l.timestamp).toLocaleString()}: ${l.command}`);
+            await message.author.send(lines.join("\n") || "No commands logged.");
+        }
+
+        // -------- Auto bridge capture (allowed channel only) --------
+        const blocks = content.split(/\n\s*\n/);
+        let bridgesAdded = 0;
+        for (const block of blocks) {
+            const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+            if (!bridgeMatch) continue;
+            const link = bridgeMatch[0];
+            const code = link.split("?")[1];
+            if (!code) continue;
+            const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+            if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) continue;
+            const structureLine = block.split("\n").find(line => line.includes(":"));
+            const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+            bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
+            bridgesAdded++;
+        }
+        if (bridgesAdded > 0) {
+            commandLog[userId].push({ command: `Added ${bridgesAdded} bridge(s)`, timestamp: now });
+            commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24*60*60*1000);
             saveCommandLog();
         }
-        if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
 
-    // -------- CLEARLIST COMMAND --------
-    if(content === "!clearlist"){
-        const count = bridgeList.length;
-        bridgeList = [];
         saveBridgeList();
-        try { await updateBridgeListMessage(channel); } catch(err){ console.error(err); }
-        commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
-        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
-        if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         return;
     }
 
-    // -------- !backups --------
-    if(content.startsWith("!backups")){
-        const files = fs.readdirSync(path.join(__dirname,"data"))
-            .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-        if(files.length===0){
-            try { await message.reply("No backups available."); } catch(err) { console.error(err); }
-            return;
-        }
-
-        const list = files.map((f,i)=>{
-            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
-            const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
-            const date = new Date(timestamp);
-            const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
-            return `[${i+1}] ${formatted} (${data.length} bridges)`;
-        });
-
-        const chunks = splitMessage(list);
-        for (const chunk of chunks) {
-            try { await message.author.send(chunk); } catch(err){ console.error(err); }
-        }
-        try { const reply = await message.reply("✅ Backup list sent via DM!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
-        if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
-
-    // -------- !restore # --------
-    if(content.startsWith("!restore")){
-        const arg = parseInt(content.split(" ")[1]);
-        if(isNaN(arg) || arg<1) return;
-
-        const files = fs.readdirSync(path.join(__dirname,"data"))
-            .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-
-        if(arg>files.length) return;
-        const chosenFile = files[arg-1];
-        if(!chosenFile) return;
-
-        try {
-            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
-            bridgeList = data;
-            saveBridgeList();
-        } catch(err){ console.error(err); return; }
-
-        try { await updateBridgeListMessage(channel); } catch(err){ console.error(err); }
-
-        commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
-        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
-
-        try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
-        if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
-    // -------- !listme --------
-    if(content.startsWith("!listme")){
-        if(bridgeList.length===0){try{await message.author.send("Bridge list is empty");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};if(channel.id===ALLOWED_CHANNEL_ID)setTimeout(async()=>{try{await message.delete()}catch{}},3000);return;}
-        const args = content.split(" ").slice(1);
-        let start=0,end=bridgeList.length;
-        if(args.length>0 && args[0].toLowerCase()!=="all"){
-            const match=args[0].match(/^(\d+)-(\d+)$/);
-            if(match){start=Math.max(0,parseInt(match[1],10)-1);end=Math.min(bridgeList.length,parseInt(match[2],10));}
-        }
-        const entries = bridgeList.slice(start,end).map((b,i)=>`${i+1}. ${b.color}${b.name}\n${b.bridge}`);
-        const chunks = splitMessage(entries);
-        try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Your Bridge List:**\n\n":`**Your Bridge List (Part ${i+1}):**\n\n`)+chunks[i]);}
-            try{const reply=await message.reply("✅ Bridge list sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
-        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
-        if(channel.id===ALLOWED_CHANNEL_ID)setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
-
-    // -------- !viewlog --------
-    if(content.startsWith("!viewlog")){
-        let allLogs=[];
-        for(const uid in commandLog){
-            const user = await client.users.fetch(uid).catch(()=>null);
-            const username = user?user.tag:uid;
-            commandLog[uid].forEach(entry=>allLogs.push(`${username} → <t:${Math.floor(entry.timestamp/1000)}:T> → ${entry.command}`));
-        }
-        allLogs.sort((a,b)=>parseInt(a.match(/<t:(\d+):T>/)[1])-parseInt(b.match(/<t:(\d+):T>/)[1]));
-        if(allLogs.length===0){try{await message.author.send("No commands logged in the last 24 hours");}catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}};if(channel.id===ALLOWED_CHANNEL_ID)setTimeout(async()=>{try{await message.delete()}catch{}},3000);return;}
-        const chunks = splitMessage(allLogs,1900);
-        try{for(let i=0;i<chunks.length;i++){await message.author.send((i===0?"**Command Log (last 24h):**\n\n":`**Command Log (Part ${i+1}):**\n\n`)+chunks[i]);}
-            try{const reply=await message.reply("✅ Command log sent via DM!");setTimeout(async()=>{try{await reply.delete()}catch{}},5000);}catch{}
-        }catch{try{await message.channel.send(`${message.author}, I can't DM you.`)}catch{}}
-        if(channel.id===ALLOWED_CHANNEL_ID)setTimeout(async()=>{try{await message.delete()}catch{}},3000);
-        return;
-    }
-
-    // ----------------- Coordinate and Report detection (mirror messages) -----------------
-    if (channel.id === ALLOWED_CHANNEL_ID) {
-        // --- Coordinates ---
+    // ================= MIRRORING (all other channels) =================
+    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
         const coordMatches = [...content.matchAll(/l\+k:\/\/coordinates?\?[\d,&]+/gi)];
         if (coordMatches.length > 0) {
             const coordLinks = coordMatches.map(m => {
@@ -328,13 +240,11 @@ client.on("messageCreate", async (message) => {
             }).join("\n");
 
             const mirrored = `**${message.author.username}:**\n${content}\n\n${coordLinks}`;
-            try { await channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
+            try { await message.delete(); } catch(err) {}
             return;
         }
 
-        // --- Reports ---
         const reportMatches = [...content.matchAll(/l\+k:\/\/report\?[\d,&]+/gi)];
         if (reportMatches.length > 0) {
             const reportLinks = reportMatches.map(m => {
@@ -343,39 +253,12 @@ client.on("messageCreate", async (message) => {
             }).join("\n");
 
             const mirrored = `**${message.author.username}:**\n${content}\n\n${reportLinks}`;
-            try { await channel.send(mirrored); } catch(err){ console.error("❌ Error sending mirrored message:", err); }
-
-            setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+            try { await message.channel.send(mirrored); } catch(err){ console.error(err); }
+            try { await message.delete(); } catch(err) {}
             return;
         }
     }
-
-    // -------- Bridge detection (keep existing) --------
-    const blocks = content.split(/\n\s*\n/);
-    let bridgesAdded=0;
-    for(const block of blocks){
-        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if(!bridgeMatch) continue;
-        const link=bridgeMatch[0];
-        const code=link.split("?")[1];
-        if(!code) continue;
-        const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-        if(bridgeList.some(entry=>entry.bridgeLink?.includes(code))) continue;
-        const structureLine=block.split("\n").find(line=>line.includes(":"));
-        const displayName = structureLine?structureLine.split(":").map(s=>s.trim()).join("/"):"Unknown Structure";
-        bridgeList.push({bridgeLink:link,vercelLink,bridge:link,vercel:vercelLink,name:displayName,color:""});
-        bridgesAdded++;
-    }
-    if(bridgesAdded>0){
-        commandLog[userId].push({command:`Added ${bridgesAdded} bridge${bridgesAdded>1?"s":""}`,timestamp:now});
-        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
-    }
-
-    saveBridgeList();
-    try { await updateBridgeListMessage(channel); } catch(err){ console.error(err); }
-
-    if(channel.id === ALLOWED_CHANNEL_ID) setTimeout(async()=>{try{await message.delete()}catch{}},3000);
 });
+
 // ----------------- LOGIN -----------------
 client.login(process.env.BOT_TOKEN);
