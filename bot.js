@@ -92,12 +92,12 @@ async function cleanChannel(channel) {
         // Fetch recent messages (limit to 50 to be safer)
         const messages = await channel.messages.fetch({ limit: 50 });
         
-        // Only delete bot messages that are NOT in lastListMessages and are older than 5 minutes
+        // Only delete bot messages that are NOT in lastListMessages and are NEWER than 5 minutes (safety window)
         const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
         const toDelete = messages.filter(m => 
             m.author.id === client.user.id && 
             !lastListMessages.some(l => l.id === m.id) &&
-            m.createdTimestamp < fiveMinutesAgo &&
+            m.createdTimestamp > fiveMinutesAgo &&
             (m.content.startsWith("**Bridge List") || m.content === "Bridge list is currently empty.")
         );
         
@@ -107,7 +107,7 @@ async function cleanChannel(channel) {
             const limitedDelete = toDelete.first(10);
             await channel.bulkDelete(limitedDelete, true);
         } else if (toDelete.size > 0) {
-            console.log(`🧹 Cleaning ${toDelete.size} old bridge list messages`);
+            console.log(`🧹 Cleaning ${toDelete.size} recent duplicate bridge list messages`);
             await channel.bulkDelete(toDelete, true);
         }
     } catch (err) { console.error("❌ Error cleaning channel:", err); }
