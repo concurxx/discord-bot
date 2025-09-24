@@ -86,29 +86,48 @@ function splitMessage(entries, maxLength = 1900) {
 // ----------------- CLEAN & UPDATE -----------------
 async function cleanChannel(channel) {
     try {
+        // Only clean the allowed channel where bridge list is maintained
+        if (channel.id !== ALLOWED_CHANNEL_ID) return;
+        
         // Only clean if we have valid list messages to preserve
         if (lastListMessages.length === 0) return;
         
+        console.log(`🧹 Starting channel cleanup in allowed channel`);
+        
         // Fetch recent messages (limit to 50 to be safer)
         const messages = await channel.messages.fetch({ limit: 50 });
+        console.log(`📨 Fetched ${messages.size} messages for cleanup check`);
         
-        // Only delete bot messages that are NOT in lastListMessages and are NEWER than 5 minutes (safety window)
+        // Delete bot messages that are NOT in lastListMessages and are NEWER than 5 minutes (safety window)
+        // Also include old duplicate bridge list messages that are older than 5 minutes but newer than 1 hour
         const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-        const toDelete = messages.filter(m => 
-            m.author.id === client.user.id && 
-            !lastListMessages.some(l => l.id === m.id) &&
-            m.createdTimestamp > fiveMinutesAgo &&
-            (m.content.startsWith("**Bridge List") || m.content === "Bridge list is currently empty.")
-        );
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
         
-        // Safety check: don't delete more than 10 messages at once
-        if (toDelete.size > 10) {
-            console.log(`⚠️ Attempted to delete ${toDelete.size} messages, limiting to 10 for safety`);
-            const limitedDelete = toDelete.first(10);
+        const toDelete = messages.filter(m => {
+            if (m.author.id !== client.user.id) return false;
+            if (lastListMessages.some(l => l.id === m.id)) return false;
+            
+            const isRecentDuplicate = m.createdTimestamp > fiveMinutesAgo;
+            const isOldDuplicate = m.createdTimestamp < fiveMinutesAgo && m.createdTimestamp > oneHourAgo;
+            const isBridgeListMessage = m.content.startsWith("**Bridge List") || m.content === "Bridge list is currently empty.";
+            
+            return (isRecentDuplicate || isOldDuplicate) && isBridgeListMessage;
+        });
+        
+        console.log(`🗑️ Found ${toDelete.size} messages to delete`);
+        
+        // Safety check: don't delete more than 15 messages at once
+        if (toDelete.size > 15) {
+            console.log(`⚠️ Attempted to delete ${toDelete.size} messages, limiting to 15 for safety`);
+            const limitedDelete = toDelete.first(15);
             await channel.bulkDelete(limitedDelete, true);
+            console.log(`✅ Deleted 15 duplicate bridge list messages`);
         } else if (toDelete.size > 0) {
-            console.log(`🧹 Cleaning ${toDelete.size} recent duplicate bridge list messages`);
+            console.log(`🧹 Cleaning ${toDelete.size} duplicate bridge list messages`);
             await channel.bulkDelete(toDelete, true);
+            console.log(`✅ Successfully cleaned ${toDelete.size} messages`);
+        } else {
+            console.log(`✨ No duplicate messages found - channel is clean`);
         }
     } catch (err) { console.error("❌ Error cleaning channel:", err); }
 }
@@ -143,9 +162,11 @@ async function updateBridgeListMessage(channel) {
         }
     }
 
-    // Only clean channel occasionally, not on every update
-    if (Math.random() < 0.1) { // 10% chance to clean
-        await cleanChannel(channel);
+    // Clean channel more frequently when in the allowed channel
+    if (channel.id === ALLOWED_CHANNEL_ID) {
+        if (Math.random() < 0.3) { // 30% chance to clean in allowed channel
+            await cleanChannel(channel);
+        }
     }
 }
 
@@ -178,7 +199,7 @@ client.on("messageCreate", async (message) => {
     if (!commandLog[userId]) commandLog[userId] = [];
 
     // ----------------- COMMANDS -----------------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|backups|restore|listme|viewlog)/i.test(content)) {
+    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup)/i.test(content)) {
         try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -217,7 +238,7 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------- CLEARLIST --------
-    if(content === "!clearlist"){
+    if(content === "!clearlist" || content === "!listclear"){
         const count = bridgeList.length;
         bridgeList = [];
         saveBridgeList();
@@ -311,6 +332,18 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- CLEANUP --------
+    if(content.startsWith("!cleanup")){
+        console.log(`🧹 Manual cleanup requested by ${message.author.tag}`);
+        await cleanChannel(message.channel);
+        commandLog[userId].push({command:"!cleanup", timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+        try { const reply = await message.reply("✅ Channel cleanup completed!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
     // ----------------- MIRROR MESSAGES -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID) {
         const mirrorTypes = [
@@ -336,18 +369,32 @@ client.on("messageCreate", async (message) => {
     }
 
 // ----------------- BRIDGE DETECTION -----------------
+console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
 const blocks = content.split(/\n\s*\n/);
+console.log(`📝 Split into ${blocks.length} blocks`);
 let bridgesAdded = 0;
 for (const block of blocks) {
     const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-    if (!bridgeMatch) continue;
+    if (!bridgeMatch) {
+        console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
+        continue;
+    }
+    console.log(`✅ Found bridge link: ${bridgeMatch[0]}`);
     const link = bridgeMatch[0];
     const code = link.split("?")[1];
-    if (!code) continue;
+    if (!code) {
+        console.log(`❌ No code found in link: ${link}`);
+        continue;
+    }
+    console.log(`🔑 Extracted code: ${code}`);
     const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-    if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) continue;
+    if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) {
+        console.log(`⚠️ Bridge already exists with code: ${code}`);
+        continue;
+    }
     const structureLine = block.split("\n").find(line => line.includes(":"));
     const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+    console.log(`➕ Adding bridge: ${displayName} - ${link}`);
     bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
     bridgesAdded++;
 }
