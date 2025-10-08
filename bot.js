@@ -361,8 +361,6 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------- TROOPS COMMAND --------
-    console.log(`🔍 Testing troops command for: "${content}"`);
-    console.log(`🔍 Regex test result: ${/^!troops \d+$/i.test(content)}`);
     if (content.toLowerCase().startsWith('!troops ')) {
         console.log(`✅ Troops command matched!`);
         const parts = content.split(' ');
@@ -392,7 +390,6 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------- SILVER COMMAND --------
-    console.log(`🔍 Testing silver command for: "${content}"`);
     if (content.toLowerCase().startsWith('!silver ')) {
         console.log(`✅ Silver command matched!`);
         const parts = content.toLowerCase().split(' ');
@@ -476,6 +473,41 @@ client.on("messageCreate", async (message) => {
         commandLog[userId].push({command: "!allstats", timestamp: now});
         commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
         saveCommandLog();
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
+    // -------- HELP COMMAND --------
+    if(content.toLowerCase() === "!help" || content.toLowerCase() === "!commands"){
+        const helpText = `**Available Commands:**\n\n` +
+            `**User Data Commands:**\n` +
+            `• \`!troops <number>\` - Set your troop count\n` +
+            `• \`!silver <number> city\` - Set your silver capacity\n` +
+            `• \`!mystats\` - View your current stats\n` +
+            `• \`!allstats\` - View all users' stats\n\n` +
+            `**Bridge List Commands:** *(Allowed channel only)*\n` +
+            `• \`!red <number>\`, \`!yellow <number>\`, \`!green <number>\` - Color bridges\n` +
+            `• \`!remove <number>\` - Remove a bridge\n` +
+            `• \`!clearlist\` - Clear all bridges\n` +
+            `• \`!listme\` - Get bridge list via DM\n` +
+            `• \`!backups\`, \`!restore <number>\` - Manage backups\n` +
+            `• \`!viewlog\` - View command history\n` +
+            `• \`!cleanup\` - Clean duplicate messages\n\n` +
+            `**Examples:**\n` +
+            `• \`!troops 40000\` - Sets your troops to 40,000\n` +
+            `• \`!silver 1 city\` - Sets your silver capacity to 1 city`;
+        
+        try {
+            await message.author.send(helpText);
+            const reply = await message.reply("✅ Help sent via DM!");
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        } catch {
+            try {
+                const reply = await message.channel.send(helpText);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 20000);
+            } catch(err) { console.error(err); }
+        }
         
         setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
@@ -620,41 +652,6 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
-    // -------- HELP COMMAND --------
-    if(content.toLowerCase() === "!help" || content.toLowerCase() === "!commands"){
-        const helpText = `**Available Commands:**\n\n` +
-            `**User Data Commands:**\n` +
-            `• \`!troops <number>\` - Set your troop count\n` +
-            `• \`!silver <number> city\` - Set your silver capacity\n` +
-            `• \`!mystats\` - View your current stats\n` +
-            `• \`!allstats\` - View all users' stats\n\n` +
-            `**Bridge List Commands:** *(Allowed channel only)*\n` +
-            `• \`!red <number>\`, \`!yellow <number>\`, \`!green <number>\` - Color bridges\n` +
-            `• \`!remove <number>\` - Remove a bridge\n` +
-            `• \`!clearlist\` - Clear all bridges\n` +
-            `• \`!listme\` - Get bridge list via DM\n` +
-            `• \`!backups\`, \`!restore <number>\` - Manage backups\n` +
-            `• \`!viewlog\` - View command history\n` +
-            `• \`!cleanup\` - Clean duplicate messages\n\n` +
-            `**Examples:**\n` +
-            `• \`!troops 40000\` - Sets your troops to 40,000\n` +
-            `• \`!silver 1 city\` - Sets your silver capacity to 1 city`;
-        
-        try {
-            await message.author.send(helpText);
-            const reply = await message.reply("✅ Help sent via DM!");
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
-        } catch {
-            try {
-                const reply = await message.channel.send(helpText);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 20000);
-            } catch(err) { console.error(err); }
-        }
-        
-        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
-        return;
-    }
-
     // ----------------- MIRROR MESSAGES -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID) {
         const mirrorTypes = [
@@ -681,61 +678,58 @@ client.on("messageCreate", async (message) => {
 
     // ----------------- BRIDGE DETECTION -----------------
     console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
-const blocks = content.split(/\n\s*\n/);
-console.log(`📝 Split into ${blocks.length} blocks`);
-let bridgesAdded = 0;
-for (const block of blocks) {
-    const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-    if (!bridgeMatch) {
-        console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
-        continue;
-    }
-    console.log(`✅ Found bridge link: ${bridgeMatch[0]}`);
-    const link = bridgeMatch[0];
-    const code = link.split("?")[1];
-    if (!code) {
-        console.log(`❌ No code found in link: ${link}`);
-        continue;
-    }
-    console.log(`🔑 Extracted code: ${code}`);
-    const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-    if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) {
-        console.log(`⚠️ Bridge already exists with code: ${code}`);
-        continue;
-    }
-    const structureLine = block.split("\n").find(line => line.includes(":"));
-    const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
-    console.log(`➕ Adding bridge: ${displayName} - ${link}`);
-    bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
-    bridgesAdded++;
-}
-
-if (bridgesAdded > 0) {
-    commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
-    commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-    saveCommandLog();
-    saveBridgeList();
-
-    // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
-    console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed ID: ${ALLOWED_CHANNEL_ID}, Match: ${message.channel.id === ALLOWED_CHANNEL_ID}`);
-    if (message.channel.id === ALLOWED_CHANNEL_ID) {
-        console.log(`🗑️ Attempting to delete user message with bridge link`);
-        try { 
-            await message.delete(); 
-            console.log(`✅ Successfully deleted user bridge message`);
-        } catch (err) { 
-            console.error("❌ Error deleting user bridge message:", err); 
+    const blocks = content.split(/\n\s*\n/);
+    console.log(`📝 Split into ${blocks.length} blocks`);
+    let bridgesAdded = 0;
+    for (const block of blocks) {
+        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+        if (!bridgeMatch) {
+            console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
+            continue;
         }
-    } else {
-        console.log(`ℹ️ Not deleting message - not in allowed channel`);
+        console.log(`✅ Found bridge link: ${bridgeMatch[0]}`);
+        const link = bridgeMatch[0];
+        const code = link.split("?")[1];
+        if (!code) {
+            console.log(`❌ No code found in link: ${link}`);
+            continue;
+        }
+        console.log(`🔑 Extracted code: ${code}`);
+        const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+        if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) {
+            console.log(`⚠️ Bridge already exists with code: ${code}`);
+            continue;
+        }
+        const structureLine = block.split("\n").find(line => line.includes(":"));
+        const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+        console.log(`➕ Adding bridge: ${displayName} - ${link}`);
+        bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
+        bridgesAdded++;
     }
-    
-    // Only update bridge list if bridges were actually added
-    try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
-} else {
-    // Don't update the bridge list or save if no bridges were added
-    return;
-}
+
+    if (bridgesAdded > 0) {
+        commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog();
+        saveBridgeList();
+
+        // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
+        console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed ID: ${ALLOWED_CHANNEL_ID}, Match: ${message.channel.id === ALLOWED_CHANNEL_ID}`);
+        if (message.channel.id === ALLOWED_CHANNEL_ID) {
+            console.log(`🗑️ Attempting to delete user message with bridge link`);
+            try { 
+                await message.delete(); 
+                console.log(`✅ Successfully deleted user bridge message`);
+            } catch (err) { 
+                console.error("❌ Error deleting user bridge message:", err); 
+            }
+        } else {
+            console.log(`ℹ️ Not deleting message - not in allowed channel`);
+        }
+        
+        // Only update bridge list if bridges were actually added
+        try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
+    }
 });
 
 // ----------------- LOGIN -----------------
