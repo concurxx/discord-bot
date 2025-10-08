@@ -187,24 +187,6 @@ async function restoreFromGoogleDrive() {
     }
     return false;
 }
-            
-            // Merge cloud data with local data, preferring newer timestamps
-            for (const userId in cloudData) {
-                if (!userData[userId] || 
-                    (cloudData[userId].lastUpdated && 
-                     (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
-                    userData[userId] = cloudData[userId];
-                }
-            }
-            
-            console.log("✅ User data restored from Google Drive");
-            return true;
-        }
-    } catch (err) {
-        console.error("❌ Failed to restore from Google Drive:", err.message);
-    }
-    return false;
-}
 
 // ----------------- USER DATA FUNCTIONS -----------------
 function updateUserData(userId, username, type, value) {
