@@ -1,8 +1,3 @@
-(cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF'
-diff --git a/bot.js b/bot.js
---- a/bot.js
-+++ b/bot.js
-@@ -1,431 +1,743 @@
 -const { Client, GatewayIntentBits, Partials } = require("discord.js");
 -const fs = require("fs");
 -const path = require("path");
