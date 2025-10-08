@@ -362,42 +362,63 @@ client.on("messageCreate", async (message) => {
 
     // -------- TROOPS COMMAND --------
     console.log(`🔍 Testing troops command for: "${content}"`);
-    if (/^!troops \d+$/i.test(content)) {
+    console.log(`🔍 Regex test result: ${/^!troops \d+$/i.test(content)}`);
+    if (content.toLowerCase().startsWith('!troops ')) {
         console.log(`✅ Troops command matched!`);
-        const troopCount = parseInt(content.split(" ")[1], 10);
-        updateUserData(userId, message.author.username, 'troops', troopCount);
-        
-        commandLog[userId].push({command: content, timestamp: now});
-        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog();
-        
-        try {
-            const reply = await message.reply(`✅ Updated your troop count to **${troopCount.toLocaleString()}**`);
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
-        } catch(err) { console.error(err); }
-        
-        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
-        return;
+        const parts = content.split(' ');
+        if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+            const troopCount = parseInt(parts[1], 10);
+            updateUserData(userId, message.author.username, 'troops', troopCount);
+            
+            commandLog[userId].push({command: content, timestamp: now});
+            commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+            saveCommandLog();
+            
+            try {
+                const reply = await message.reply(`✅ Updated your troop count to **${troopCount.toLocaleString()}**`);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            } catch(err) { console.error(err); }
+            
+            setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+            return;
+        } else {
+            try {
+                const reply = await message.reply(`❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\`)`);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
+            } catch(err) { console.error(err); }
+            setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+            return;
+        }
     }
 
     // -------- SILVER COMMAND --------
     console.log(`🔍 Testing silver command for: "${content}"`);
-    if (/^!silver \d+ city$/i.test(content)) {
+    if (content.toLowerCase().startsWith('!silver ')) {
         console.log(`✅ Silver command matched!`);
-        const silverCapacity = parseInt(content.split(" ")[1], 10);
-        updateUserData(userId, message.author.username, 'silver', silverCapacity);
-        
-        commandLog[userId].push({command: content, timestamp: now});
-        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog();
-        
-        try {
-            const reply = await message.reply(`✅ Updated your silver capacity to **${silverCapacity} city**`);
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
-        } catch(err) { console.error(err); }
-        
-        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
-        return;
+        const parts = content.toLowerCase().split(' ');
+        if (parts.length === 3 && /^\d+$/.test(parts[1]) && parts[2] === 'city') {
+            const silverCapacity = parseInt(parts[1], 10);
+            updateUserData(userId, message.author.username, 'silver', silverCapacity);
+            
+            commandLog[userId].push({command: content, timestamp: now});
+            commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+            saveCommandLog();
+            
+            try {
+                const reply = await message.reply(`✅ Updated your silver capacity to **${silverCapacity} city**`);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            } catch(err) { console.error(err); }
+            
+            setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+            return;
+        } else {
+            try {
+                const reply = await message.reply(`❌ Invalid format. Use: \`!silver <number> city\` (e.g., \`!silver 1 city\`)`);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
+            } catch(err) { console.error(err); }
+            setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+            return;
+        }
     }
 
     // -------- MYSTATS COMMAND --------
