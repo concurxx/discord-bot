@@ -46,6 +46,21 @@ catch (err) { console.error("❌ Error reading user data file:", err); }
 let lastListMessages = [];
 
 // ----------------- SAVE FUNCTIONS -----------------
+
+function saveCommandLog() {
+    try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
+    catch (err) { console.error("❌ Error saving command log file:", err); }
+}
+
+function saveUserData() {
+    try { 
+        fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
+        // Also backup to Google Drive
+        backupToGoogleDrive();
+    }
+    catch (err) { console.error("❌ Error saving user data file:", err); }
+}
+
 function saveBridgeList() {
     try {
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
@@ -60,21 +75,10 @@ function saveBridgeList() {
                                 fs.statSync(path.join(__dirname,"data",b)).mtimeMs);
             while (files.length > BACKUP_LIMIT) fs.unlinkSync(path.join(__dirname,"data",files.shift()));
         }
-    } catch (err) { console.log("Error saving bridge list:", err); }
-}
-
-function saveCommandLog() {
-    try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
-    catch (err) { console.error("❌ Error saving command log file:", err); }
-}
-
-function saveUserData() {
-    try { 
-        fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
+        
         // Also backup to Google Drive
         backupToGoogleDrive();
-    }
-    catch (err) { console.error("❌ Error saving user data file:", err); }
+    } catch (err) { console.log("Error saving bridge list:", err); }
 }
 
 // ----------------- GOOGLE DRIVE FUNCTIONS -----------------
@@ -127,17 +131,24 @@ async function backupToGoogleDrive() {
     try {
         const sheets = google.sheets({ version: 'v4', auth: driveAuth });
         
-        // Write JSON data to cell A1
+        // Create combined backup data
+        const backupData = {
+            userData: userData,
+            bridgeList: bridgeList,
+            lastBackup: Date.now()
+        };
+        
+        // Write combined JSON data to cell A1
         await sheets.spreadsheets.values.update({
             spreadsheetId: GOOGLE_DRIVE_FILE_ID,
             range: 'A1',
             valueInputOption: 'RAW',
             resource: {
-                values: [[JSON.stringify(userData, null, 2)]]
+                values: [[JSON.stringify(backupData, null, 2)]]
             }
         });
         
-        console.log("✅ User data backed up to Google Drive");
+        console.log("✅ Combined data (user + bridge) backed up to Google Drive");
     } catch (err) {
         console.error("❌ Failed to backup to Google Drive:", err.message);
     }
@@ -167,16 +178,50 @@ async function restoreFromGoogleDrive() {
                 return false;
             }
             
-            // Merge cloud data with local data, preferring newer timestamps
-            for (const userId in cloudData) {
-                if (!userData[userId] || 
-                    (cloudData[userId].lastUpdated && 
-                     (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
-                    userData[userId] = cloudData[userId];
+            // Check if this is the new combined format or old user-only format
+            if (cloudData.userData && cloudData.bridgeList) {
+                // New combined format
+                console.log("📦 Detected combined backup format");
+                
+                // Restore user data
+                if (cloudData.userData) {
+                    for (const userId in cloudData.userData) {
+                        if (!userData[userId] || 
+                            (cloudData.userData[userId].lastUpdated && 
+                             (!userData[userId].lastUpdated || cloudData.userData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                            userData[userId] = cloudData.userData[userId];
+                        }
+                    }
+                    console.log("✅ User data restored from combined backup");
                 }
+                
+                // Restore bridge data
+                if (cloudData.bridgeList && Array.isArray(cloudData.bridgeList)) {
+                    // Only restore if local bridge list is empty or cloud data is newer
+                    if (bridgeList.length === 0 || 
+                        (cloudData.lastBackup && cloudData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
+                        bridgeList = cloudData.bridgeList;
+                        console.log(`✅ Bridge list restored from combined backup (${bridgeList.length} bridges)`);
+                    } else {
+                        console.log("ℹ️ Local bridge data is newer, keeping local version");
+                    }
+                }
+                
+            } else {
+                // Old user-only format - backward compatibility
+                console.log("📦 Detected legacy user-only backup format");
+                
+                // Merge cloud data with local data, preferring newer timestamps
+                for (const userId in cloudData) {
+                    if (!userData[userId] || 
+                        (cloudData[userId].lastUpdated && 
+                         (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                        userData[userId] = cloudData[userId];
+                    }
+                }
+                console.log("✅ User data restored from legacy backup");
             }
             
-            console.log("✅ User data restored from Google Drive");
             return true;
         } else {
             console.log("📝 No data found in sheet, starting fresh");
@@ -353,7 +398,7 @@ client.once("ready", async () => {
     // Initialize Google Drive
     await initializeGoogleDrive();
     
-    // Try to restore user data from Google Drive
+    // Try to restore data from Google Drive (both user data and bridge data)
     await restoreFromGoogleDrive();
     
     try {
@@ -384,7 +429,7 @@ client.on("messageCreate", async (message) => {
     console.log(`📨 Processing message: "${content}" from ${message.author.username}`);
 
     // ----------------- COMMANDS -----------------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup)/i.test(content)) {
+    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
         try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -521,7 +566,8 @@ client.on("messageCreate", async (message) => {
             `• \`!remove <number>\` - Remove a bridge\n` +
             `• \`!clearlist\` - Clear all bridges\n` +
             `• \`!listme\` - Get bridge list via DM\n` +
-            `• \`!backups\`, \`!restore <number>\` - Manage backups\n` +
+            `• \`!backups\`, \`!restore <number>\` - Manage local backups\n` +
+            `• \`!backup\` - Backup to Google Drive\n` +
             `• \`!viewlog\` - View command history\n` +
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
             `**Examples:**\n` +
@@ -678,6 +724,18 @@ client.on("messageCreate", async (message) => {
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog();
         try { const reply = await message.reply("✅ Channel cleanup completed!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
+        setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    // -------- BACKUP --------
+    if(content.toLowerCase() === "!backup"){
+        console.log(`💾 Manual backup requested by ${message.author.tag}`);
+        await backupToGoogleDrive();
+        commandLog[userId].push({command:"!backup", timestamp:now});
+        commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+        saveCommandLog();
+        try { const reply = await message.reply("✅ Data backed up to Google Drive!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
