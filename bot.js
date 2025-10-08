@@ -87,20 +87,36 @@ async function initializeGoogleDrive() {
     }
     
     try {
+        console.log(`🔍 Decoding service account key...`);
         const credentials = JSON.parse(Buffer.from(GOOGLE_SERVICE_ACCOUNT_KEY, 'base64').toString());
+        console.log(`📧 Service account email: ${credentials.client_email}`);
+        console.log(`🆔 Project ID: ${credentials.project_id}`);
+        console.log(`📁 File ID to access: ${GOOGLE_DRIVE_FILE_ID}`);
+        
         driveAuth = new google.auth.GoogleAuth({
             credentials,
             scopes: ['https://www.googleapis.com/auth/drive.file']
         });
         
+        console.log(`🔐 Authentication created, testing file access...`);
+        
         // Test the connection
         const drive = google.drive({ version: 'v3', auth: driveAuth });
-        await drive.files.get({ fileId: GOOGLE_DRIVE_FILE_ID });
+        console.log(`🔍 Attempting to access file...`);
+        const fileInfo = await drive.files.get({ fileId: GOOGLE_DRIVE_FILE_ID });
+        console.log(`📁 File found: ${fileInfo.data.name}`);
         
         console.log("✅ Google Drive initialized successfully");
         return true;
     } catch (err) {
-        console.error("❌ Failed to initialize Google Drive:", err.message);
+        console.error("❌ Failed to initialize Google Drive:");
+        console.error(`   Error type: ${err.constructor.name}`);
+        console.error(`   Error message: ${err.message}`);
+        console.error(`   Error code: ${err.code}`);
+        if (err.response) {
+            console.error(`   HTTP status: ${err.response.status}`);
+            console.error(`   Response data:`, err.response.data);
+        }
         return false;
     }
 }
