@@ -125,15 +125,16 @@ async function backupToGoogleDrive() {
     if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return;
     
     try {
-        const drive = google.drive({ version: 'v3', auth: driveAuth });
-        const media = {
-            mimeType: 'application/json',
-            body: JSON.stringify(userData, null, 2)
-        };
+        const sheets = google.sheets({ version: 'v4', auth: driveAuth });
         
-        await drive.files.update({
-            fileId: GOOGLE_DRIVE_FILE_ID,
-            media: media
+        // Write JSON data to cell A1
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: GOOGLE_DRIVE_FILE_ID,
+            range: 'A1',
+            valueInputOption: 'RAW',
+            resource: {
+                values: [[JSON.stringify(userData, null, 2)]]
+            }
         });
         
         console.log("✅ User data backed up to Google Drive");
@@ -146,26 +147,46 @@ async function restoreFromGoogleDrive() {
     if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return false;
     
     try {
-        const drive = google.drive({ version: 'v3', auth: driveAuth });
+        const sheets = google.sheets({ version: 'v4', auth: driveAuth });
         
-        // Export the Google Sheet as plain text
-        console.log(`📥 Downloading file content...`);
-        const response = await drive.files.export({
-            fileId: GOOGLE_DRIVE_FILE_ID,
-            mimeType: 'text/plain'
+        console.log(`📥 Reading data from Google Sheet...`);
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: GOOGLE_DRIVE_FILE_ID,
+            range: 'A1'
         });
         
-        console.log(`📄 Raw content: ${response.data}`);
-        
-        if (response.data && response.data.trim()) {
+        if (response.data.values && response.data.values[0] && response.data.values[0][0]) {
+            const rawData = response.data.values[0][0];
+            console.log(`📄 Raw content: ${rawData.substring(0, 100)}...`);
+            
             let cloudData;
             try {
-                // Try to parse as JSON
-                cloudData = JSON.parse(response.data.trim());
+                cloudData = JSON.parse(rawData);
             } catch (parseError) {
-                console.log(`⚠️ Content is not valid JSON, starting fresh: ${response.data}`);
+                console.log(`⚠️ Content is not valid JSON, starting fresh`);
                 return false;
             }
+            
+            // Merge cloud data with local data, preferring newer timestamps
+            for (const userId in cloudData) {
+                if (!userData[userId] || 
+                    (cloudData[userId].lastUpdated && 
+                     (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                    userData[userId] = cloudData[userId];
+                }
+            }
+            
+            console.log("✅ User data restored from Google Drive");
+            return true;
+        } else {
+            console.log("📝 No data found in sheet, starting fresh");
+            return false;
+        }
+    } catch (err) {
+        console.error("❌ Failed to restore from Google Drive:", err.message);
+    }
+    return false;
+}
             
             // Merge cloud data with local data, preferring newer timestamps
             for (const userId in cloudData) {
