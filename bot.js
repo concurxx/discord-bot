@@ -30,7 +30,14 @@ if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirna
 
 // Load bridge list
 let bridgeList = [];
-try { if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } 
+try { 
+    if (fs.existsSync(DATA_FILE)) {
+        bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+        console.log(`📁 Loaded ${bridgeList.length} bridges from local file`);
+    } else {
+        console.log("📁 No local bridge file found, starting with empty list");
+    }
+} 
 catch (err) { console.log("Error reading bridge list file:", err); }
 
 // Load command log
@@ -40,7 +47,14 @@ catch (err) { console.error("❌ Error reading command log file:", err); }
 
 // Load user data
 let userData = {};
-try { if (fs.existsSync(USER_DATA_FILE)) userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8")); } 
+try { 
+    if (fs.existsSync(USER_DATA_FILE)) {
+        userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8"));
+        console.log(`📁 Loaded ${Object.keys(userData).length} users from local file`);
+    } else {
+        console.log("📁 No local user data file found, starting with empty data");
+    }
+} 
 catch (err) { console.error("❌ Error reading user data file:", err); }
 
 let lastListMessages = [];
@@ -48,12 +62,24 @@ let lastListMessages = [];
 // ----------------- SAVE FUNCTIONS -----------------
 
 function saveCommandLog() {
-    try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
+    try { 
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
+        fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); 
+    }
     catch (err) { console.error("❌ Error saving command log file:", err); }
 }
 
 function saveUserData() {
     try { 
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
         fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
         // Also backup to Google Drive
         backupToGoogleDrive();
@@ -63,6 +89,11 @@ function saveUserData() {
 
 function saveBridgeList() {
     try {
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
 
         if(bridgeList.length > 0){
@@ -182,6 +213,7 @@ async function restoreFromGoogleDrive() {
             if (cloudData.userData && cloudData.bridgeList) {
                 // New combined format
                 console.log("📦 Detected combined backup format");
+                console.log(`📊 Cloud data: ${Object.keys(cloudData.userData).length} users, ${cloudData.bridgeList.length} bridges`);
                 
                 // Restore user data
                 if (cloudData.userData) {
@@ -197,11 +229,14 @@ async function restoreFromGoogleDrive() {
                 
                 // Restore bridge data
                 if (cloudData.bridgeList && Array.isArray(cloudData.bridgeList)) {
+                    console.log(`🔍 Local bridge count: ${bridgeList.length}, Cloud bridge count: ${cloudData.bridgeList.length}`);
                     // Only restore if local bridge list is empty or cloud data is newer
                     if (bridgeList.length === 0 || 
                         (cloudData.lastBackup && cloudData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
                         bridgeList = cloudData.bridgeList;
                         console.log(`✅ Bridge list restored from combined backup (${bridgeList.length} bridges)`);
+                        // Save the restored bridge data locally
+                        saveBridgeList();
                     } else {
                         console.log("ℹ️ Local bridge data is newer, keeping local version");
                     }
@@ -210,6 +245,7 @@ async function restoreFromGoogleDrive() {
             } else {
                 // Old user-only format - backward compatibility
                 console.log("📦 Detected legacy user-only backup format");
+                console.log(`📊 Legacy data: ${Object.keys(cloudData).length} users`);
                 
                 // Merge cloud data with local data, preferring newer timestamps
                 for (const userId in cloudData) {
