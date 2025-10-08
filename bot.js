@@ -1,13 +1,19 @@
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const { google } = require('googleapis');
 
 // ================= CONFIG =================
 const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
 const COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
+const USER_DATA_FILE = path.join(__dirname, "data", "userData.json");
 const BACKUP_LIMIT = 10; // how many backups to keep
+
+// Google Drive Config
+const GOOGLE_DRIVE_FILE_ID = process.env.GOOGLE_DRIVE_FILE_ID; // File ID for userData backup
+const GOOGLE_SERVICE_ACCOUNT_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY; // Base64 encoded service account JSON
 // =========================================
 
 const client = new Client({
@@ -32,6 +38,11 @@ let commandLog = {};
 try { if (fs.existsSync(COMMAND_LOG_FILE)) commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8")); } 
 catch (err) { console.error("❌ Error reading command log file:", err); }
 
+// Load user data
+let userData = {};
+try { if (fs.existsSync(USER_DATA_FILE)) userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8")); } 
+catch (err) { console.error("❌ Error reading user data file:", err); }
+
 let lastListMessages = [];
 
 // ----------------- SAVE FUNCTIONS -----------------
@@ -55,6 +66,141 @@ function saveBridgeList() {
 function saveCommandLog() {
     try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
     catch (err) { console.error("❌ Error saving command log file:", err); }
+}
+
+function saveUserData() {
+    try { 
+        fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
+        // Also backup to Google Drive
+        backupToGoogleDrive();
+    }
+    catch (err) { console.error("❌ Error saving user data file:", err); }
+}
+
+// ----------------- GOOGLE DRIVE FUNCTIONS -----------------
+let driveAuth = null;
+
+async function initializeGoogleDrive() {
+    if (!GOOGLE_SERVICE_ACCOUNT_KEY || !GOOGLE_DRIVE_FILE_ID) {
+        console.log("⚠️ Google Drive not configured - user data will only persist locally");
+        return false;
+    }
+    
+    try {
+        const credentials = JSON.parse(Buffer.from(GOOGLE_SERVICE_ACCOUNT_KEY, 'base64').toString());
+        driveAuth = new google.auth.GoogleAuth({
+            credentials,
+            scopes: ['https://www.googleapis.com/auth/drive.file']
+        });
+        
+        // Test the connection
+        const drive = google.drive({ version: 'v3', auth: driveAuth });
+        await drive.files.get({ fileId: GOOGLE_DRIVE_FILE_ID });
+        
+        console.log("✅ Google Drive initialized successfully");
+        return true;
+    } catch (err) {
+        console.error("❌ Failed to initialize Google Drive:", err.message);
+        return false;
+    }
+}
+
+async function backupToGoogleDrive() {
+    if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return;
+    
+    try {
+        const drive = google.drive({ version: 'v3', auth: driveAuth });
+        const media = {
+            mimeType: 'application/json',
+            body: JSON.stringify(userData, null, 2)
+        };
+        
+        await drive.files.update({
+            fileId: GOOGLE_DRIVE_FILE_ID,
+            media: media
+        });
+        
+        console.log("✅ User data backed up to Google Drive");
+    } catch (err) {
+        console.error("❌ Failed to backup to Google Drive:", err.message);
+    }
+}
+
+async function restoreFromGoogleDrive() {
+    if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return false;
+    
+    try {
+        const drive = google.drive({ version: 'v3', auth: driveAuth });
+        const response = await drive.files.get({
+            fileId: GOOGLE_DRIVE_FILE_ID,
+            alt: 'media'
+        });
+        
+        if (response.data) {
+            const cloudData = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+            
+            // Merge cloud data with local data, preferring newer timestamps
+            for (const userId in cloudData) {
+                if (!userData[userId] || 
+                    (cloudData[userId].lastUpdated && 
+                     (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                    userData[userId] = cloudData[userId];
+                }
+            }
+            
+            saveUserData();
+            console.log("✅ User data restored from Google Drive");
+            return true;
+        }
+    } catch (err) {
+        console.error("❌ Failed to restore from Google Drive:", err.message);
+    }
+    return false;
+}
+
+// ----------------- USER DATA FUNCTIONS -----------------
+function updateUserData(userId, username, type, value) {
+    if (!userData[userId]) {
+        userData[userId] = {
+            username: username,
+            troops: null,
+            silver: null,
+            lastUpdated: Date.now()
+        };
+    }
+    
+    userData[userId].username = username; // Update username in case it changed
+    userData[userId][type] = value;
+    userData[userId].lastUpdated = Date.now();
+    
+    saveUserData();
+}
+
+function formatUserStats(userId) {
+    const user = userData[userId];
+    if (!user) return null;
+    
+    const troops = user.troops !== null ? user.troops.toLocaleString() : "Not set";
+    const silver = user.silver !== null ? `${user.silver} city` : "Not set";
+    const lastUpdated = user.lastUpdated ? `<t:${Math.floor(user.lastUpdated / 1000)}:R>` : "Unknown";
+    
+    return `**${user.username}**\n🏰 Troops: ${troops}\n💰 Silver: ${silver}\n📅 Last updated: ${lastUpdated}`;
+}
+
+function formatAllStats() {
+    const users = Object.entries(userData)
+        .filter(([_, user]) => user.troops !== null || user.silver !== null)
+        .sort((a, b) => (b[1].lastUpdated || 0) - (a[1].lastUpdated || 0));
+    
+    if (users.length === 0) return "No user data available.";
+    
+    return users.map(([userId, user]) => {
+        const troops = user.troops !== null ? user.troops.toLocaleString() : "❌";
+        const silver = user.silver !== null ? `${user.silver} city` : "❌";
+        const lastUpdated = user.lastUpdated ? `<t:${Math.floor(user.lastUpdated / 1000)}:R>` : "❓";
+        
+        return `**${user.username}** | 🏰 ${troops} | 💰 ${silver} | ${lastUpdated}`;
+    }).join("\n");
 }
 
 // ----------------- FORMAT & SPLIT -----------------
@@ -173,6 +319,13 @@ async function updateBridgeListMessage(channel) {
 // ----------------- BOT READY -----------------
 client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+    
+    // Initialize Google Drive
+    await initializeGoogleDrive();
+    
+    // Try to restore user data from Google Drive
+    await restoreFromGoogleDrive();
+    
     try {
         const channel = await client.channels.fetch(ALLOWED_CHANNEL_ID);
         if (!channel) return console.error("❌ Could not find channel for bridge list");
@@ -202,6 +355,102 @@ client.on("messageCreate", async (message) => {
     if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup)/i.test(content)) {
         try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    // -------- TROOPS COMMAND --------
+    if (/^!troops \d+$/i.test(content)) {
+        const troopCount = parseInt(content.split(" ")[1], 10);
+        updateUserData(userId, message.author.username, 'troops', troopCount);
+        
+        commandLog[userId].push({command: content, timestamp: now});
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog();
+        
+        try {
+            const reply = await message.reply(`✅ Updated your troop count to **${troopCount.toLocaleString()}**`);
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        } catch(err) { console.error(err); }
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
+    // -------- SILVER COMMAND --------
+    if (/^!silver \d+ city$/i.test(content)) {
+        const silverCapacity = parseInt(content.split(" ")[1], 10);
+        updateUserData(userId, message.author.username, 'silver', silverCapacity);
+        
+        commandLog[userId].push({command: content, timestamp: now});
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog();
+        
+        try {
+            const reply = await message.reply(`✅ Updated your silver capacity to **${silverCapacity} city**`);
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        } catch(err) { console.error(err); }
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
+    // -------- MYSTATS COMMAND --------
+    if (content.toLowerCase() === "!mystats") {
+        const stats = formatUserStats(userId);
+        
+        if (!stats) {
+            try {
+                const reply = await message.reply("⚠️ You haven't set any stats yet. Use `!troops <number>` or `!silver <number> city` to get started!");
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
+            } catch(err) { console.error(err); }
+        } else {
+            try {
+                await message.author.send(`**Your Stats:**\n\n${stats}`);
+                const reply = await message.reply("✅ Your stats have been sent via DM!");
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            } catch {
+                try {
+                    const reply = await message.reply(`**Your Stats:**\n\n${stats}`);
+                    setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
+                } catch(err) { console.error(err); }
+            }
+        }
+        
+        commandLog[userId].push({command: "!mystats", timestamp: now});
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog();
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
+    // -------- ALLSTATS COMMAND --------
+    if (content.toLowerCase() === "!allstats") {
+        const allStats = formatAllStats();
+        const chunks = splitMessage([allStats], 1900);
+        
+        try {
+            for (let i = 0; i < chunks.length; i++) {
+                const header = i === 0 ? "**All User Stats:**\n\n" : `**All User Stats (Part ${i+1}):**\n\n`;
+                await message.author.send(header + chunks[i]);
+            }
+            const reply = await message.reply("✅ All stats have been sent via DM!");
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        } catch {
+            try {
+                for (let i = 0; i < chunks.length; i++) {
+                    const header = i === 0 ? "**All User Stats:**\n\n" : `**All User Stats (Part ${i+1}):**\n\n`;
+                    const reply = await message.channel.send(header + chunks[i]);
+                    setTimeout(async() => {try{await reply.delete()}catch{}}, 15000);
+                }
+            } catch(err) { console.error(err); }
+        }
+        
+        commandLog[userId].push({command: "!allstats", timestamp: now});
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog();
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
     }
 
@@ -344,6 +593,41 @@ client.on("messageCreate", async (message) => {
         return;
     }
 
+    // -------- HELP COMMAND --------
+    if(content.toLowerCase() === "!help" || content.toLowerCase() === "!commands"){
+        const helpText = `**Available Commands:**\n\n` +
+            `**User Data Commands:**\n` +
+            `• \`!troops <number>\` - Set your troop count\n` +
+            `• \`!silver <number> city\` - Set your silver capacity\n` +
+            `• \`!mystats\` - View your current stats\n` +
+            `• \`!allstats\` - View all users' stats\n\n` +
+            `**Bridge List Commands:** *(Allowed channel only)*\n` +
+            `• \`!red <number>\`, \`!yellow <number>\`, \`!green <number>\` - Color bridges\n` +
+            `• \`!remove <number>\` - Remove a bridge\n` +
+            `• \`!clearlist\` - Clear all bridges\n` +
+            `• \`!listme\` - Get bridge list via DM\n` +
+            `• \`!backups\`, \`!restore <number>\` - Manage backups\n` +
+            `• \`!viewlog\` - View command history\n` +
+            `• \`!cleanup\` - Clean duplicate messages\n\n` +
+            `**Examples:**\n` +
+            `• \`!troops 40000\` - Sets your troops to 40,000\n` +
+            `• \`!silver 1 city\` - Sets your silver capacity to 1 city`;
+        
+        try {
+            await message.author.send(helpText);
+            const reply = await message.reply("✅ Help sent via DM!");
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        } catch {
+            try {
+                const reply = await message.channel.send(helpText);
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 20000);
+            } catch(err) { console.error(err); }
+        }
+        
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
     // ----------------- MIRROR MESSAGES -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID) {
         const mirrorTypes = [
@@ -368,8 +652,8 @@ client.on("messageCreate", async (message) => {
         }
     }
 
-// ----------------- BRIDGE DETECTION -----------------
-console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
+    // ----------------- BRIDGE DETECTION -----------------
+    console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
 const blocks = content.split(/\n\s*\n/);
 console.log(`📝 Split into ${blocks.length} blocks`);
 let bridgesAdded = 0;
