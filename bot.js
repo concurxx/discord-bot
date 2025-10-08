@@ -147,13 +147,25 @@ async function restoreFromGoogleDrive() {
     
     try {
         const drive = google.drive({ version: 'v3', auth: driveAuth });
-        const response = await drive.files.get({
+        
+        // Export the Google Sheet as plain text
+        console.log(`📥 Downloading file content...`);
+        const response = await drive.files.export({
             fileId: GOOGLE_DRIVE_FILE_ID,
-            alt: 'media'
+            mimeType: 'text/plain'
         });
         
-        if (response.data) {
-            const cloudData = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        console.log(`📄 Raw content: ${response.data}`);
+        
+        if (response.data && response.data.trim()) {
+            let cloudData;
+            try {
+                // Try to parse as JSON
+                cloudData = JSON.parse(response.data.trim());
+            } catch (parseError) {
+                console.log(`⚠️ Content is not valid JSON, starting fresh: ${response.data}`);
+                return false;
+            }
             
             // Merge cloud data with local data, preferring newer timestamps
             for (const userId in cloudData) {
@@ -164,7 +176,6 @@ async function restoreFromGoogleDrive() {
                 }
             }
             
-            saveUserData();
             console.log("✅ User data restored from Google Drive");
             return true;
         }
