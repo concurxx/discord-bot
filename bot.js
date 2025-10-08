@@ -350,6 +350,8 @@ client.on("messageCreate", async (message) => {
     const now = Date.now();
     const userId = message.author.id;
     if (!commandLog[userId]) commandLog[userId] = [];
+    
+    console.log(`📨 Processing message: "${content}" from ${message.author.username}`);
 
     // ----------------- COMMANDS -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup)/i.test(content)) {
@@ -359,7 +361,9 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------- TROOPS COMMAND --------
+    console.log(`🔍 Testing troops command for: "${content}"`);
     if (/^!troops \d+$/i.test(content)) {
+        console.log(`✅ Troops command matched!`);
         const troopCount = parseInt(content.split(" ")[1], 10);
         updateUserData(userId, message.author.username, 'troops', troopCount);
         
@@ -377,7 +381,9 @@ client.on("messageCreate", async (message) => {
     }
 
     // -------- SILVER COMMAND --------
+    console.log(`🔍 Testing silver command for: "${content}"`);
     if (/^!silver \d+ city$/i.test(content)) {
+        console.log(`✅ Silver command matched!`);
         const silverCapacity = parseInt(content.split(" ")[1], 10);
         updateUserData(userId, message.author.username, 'silver', silverCapacity);
         
