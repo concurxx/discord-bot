@@ -1110,19 +1110,31 @@ client.on("messageCreate", async (message) => {
         console.log(`📢 War count request initiated by ${message.author.tag}`);
         
         try {
-            // Get the "Blatant Disregard" role
-            const role = message.guild.roles.cache.find(role => role.name === "Blatant Disregard");
+            // Get the "Blatant Disregard" role (case-insensitive search)
+            const role = message.guild.roles.cache.find(role => 
+                role.name.toLowerCase() === "blatant disregard"
+            );
             
             if (!role) {
-                await safeReply(message, "❌ Role 'Blatant Disregard' not found!", 5000);
+                // Debug: List all available roles
+                const allRoles = message.guild.roles.cache.map(r => r.name).join(", ");
+                console.log(`🔍 Available roles in server: ${allRoles}`);
+                
+                await safeReply(message, 
+                    `❌ Role 'Blatant Disregard' not found!\n\n` +
+                    `Available roles: ${allRoles.slice(0, 1000)}${allRoles.length > 1000 ? "..." : ""}`, 
+                    10000
+                );
                 return;
             }
             
             // Get all members with the role
             const members = role.members.map(member => member.user);
             
+            console.log(`🔍 Found role: "${role.name}" with ${members.length} members`);
+            
             if (members.length === 0) {
-                await safeReply(message, "❌ No members found with the 'Blatant Disregard' role!", 5000);
+                await safeReply(message, `❌ No members found with the '${role.name}' role!`, 5000);
                 return;
             }
             
