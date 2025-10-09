@@ -72,7 +72,7 @@ let userData = {};
 let isSaving = false; // Flag to prevent restore during save operations
 
 // Load server-specific data
-function loadServerData(guildId) {
+async function loadServerData(guildId) {
     if (!SUPPORT_MULTI_SERVER) {
         // Legacy single-server mode
         loadLegacyData();
@@ -714,7 +714,7 @@ client.once("ready", async () => {
             if (SUPPORT_MULTI_SERVER) {
                 const guildId = channel.guild?.id;
                 if (guildId) {
-                    loadServerData(guildId);
+                    await loadServerData(guildId);
                     await updateBridgeListMessage(channel);
                 }
             }
@@ -735,7 +735,7 @@ client.on("messageCreate", async (message) => {
     
     // Load server-specific data
     if (SUPPORT_MULTI_SERVER && message.guild) {
-        loadServerData(guildId);
+        await loadServerData(guildId);
     } else if (!SUPPORT_MULTI_SERVER) {
         // Load legacy data once at startup
         if (!global.legacyDataLoaded) {
