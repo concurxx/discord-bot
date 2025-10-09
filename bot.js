@@ -1045,7 +1045,7 @@ client.on("messageCreate", async (message) => {
     }
 
     // ----------------- MIRROR MESSAGES -----------------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID) {
+    if (!ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
         const mirrorTypes = [
             {regex:/l\+k:\/\/coordinates?\?[\d,&]+/gi, api:"coord", label:"coordinates"},
             {regex:/l\+k:\/\/report\?[\d,&]+/gi, api:"report", label:"report"},
@@ -1069,58 +1069,61 @@ client.on("messageCreate", async (message) => {
     }
 
     // ----------------- BRIDGE DETECTION -----------------
-    console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
-    const blocks = content.split(/\n\s*\n/);
-    console.log(`📝 Split into ${blocks.length} blocks`);
-    let bridgesAdded = 0;
-    for (const block of blocks) {
-        const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
-        if (!bridgeMatch) {
-            console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
-            continue;
-        }
-        console.log(`✅ Found bridge link: ${bridgeMatch[0]}`);
-        const link = bridgeMatch[0];
-        const code = link.split("?")[1];
-        if (!code) {
-            console.log(`❌ No code found in link: ${link}`);
-            continue;
-        }
-        console.log(`🔑 Extracted code: ${code}`);
-        const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
-        if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) {
-            console.log(`⚠️ Bridge already exists with code: ${code}`);
-            continue;
-        }
-        const structureLine = block.split("\n").find(line => line.includes(":"));
-        const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
-        console.log(`➕ Adding bridge: ${displayName} - ${link}`);
-        bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
-        bridgesAdded++;
-    }
-
-    if (bridgesAdded > 0) {
-        commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
-        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog(guildId);
-        saveBridgeList(guildId);
-
-        // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
-        console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed IDs: ${ALLOWED_CHANNEL_IDS.join(', ')}, Match: ${ALLOWED_CHANNEL_IDS.includes(message.channel.id)}`);
-        if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
-            console.log(`🗑️ Attempting to delete user message with bridge link`);
-            try { 
-                await message.delete(); 
-                console.log(`✅ Successfully deleted user bridge message`);
-            } catch (err) { 
-                console.error("❌ Error deleting user bridge message:", err); 
+    // Only process bridge detection in allowed channels
+    if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
+        console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
+        const blocks = content.split(/\n\s*\n/);
+        console.log(`📝 Split into ${blocks.length} blocks`);
+        let bridgesAdded = 0;
+        for (const block of blocks) {
+            const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+            if (!bridgeMatch) {
+                console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
+                continue;
             }
-        } else {
-            console.log(`ℹ️ Not deleting message - not in allowed channel`);
+            console.log(`✅ Found bridge link: ${bridgeMatch[0]}`);
+            const link = bridgeMatch[0];
+            const code = link.split("?")[1];
+            if (!code) {
+                console.log(`❌ No code found in link: ${link}`);
+                continue;
+            }
+            console.log(`🔑 Extracted code: ${code}`);
+            const vercelLink = `${REDIRECT_DOMAIN}/api/bridge?code=${encodeURIComponent(code)}`;
+            if (bridgeList.some(entry => entry.bridgeLink?.includes(code))) {
+                console.log(`⚠️ Bridge already exists with code: ${code}`);
+                continue;
+            }
+            const structureLine = block.split("\n").find(line => line.includes(":"));
+            const displayName = structureLine ? structureLine.split(":").map(s => s.trim()).join("/") : "Unknown Structure";
+            console.log(`➕ Adding bridge: ${displayName} - ${link}`);
+            bridgeList.push({ bridgeLink: link, vercelLink, bridge: link, vercel: vercelLink, name: displayName, color: "" });
+            bridgesAdded++;
         }
-        
-        // Only update bridge list if bridges were actually added
-        try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
+
+        if (bridgesAdded > 0) {
+            commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
+            commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+            saveCommandLog(guildId);
+            saveBridgeList(guildId);
+
+            // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
+            console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed IDs: ${ALLOWED_CHANNEL_IDS.join(', ')}, Match: ${ALLOWED_CHANNEL_IDS.includes(message.channel.id)}`);
+            if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
+                console.log(`🗑️ Attempting to delete user message with bridge link`);
+                try { 
+                    await message.delete(); 
+                    console.log(`✅ Successfully deleted user bridge message`);
+                } catch (err) { 
+                    console.error("❌ Error deleting user bridge message:", err); 
+                }
+            } else {
+                console.log(`ℹ️ Not deleting message - not in allowed channel`);
+            }
+            
+            // Only update bridge list if bridges were actually added
+            try { await updateBridgeListMessage(message.channel); } catch (err) { console.error(err); }
+        }
     }
 });
 
