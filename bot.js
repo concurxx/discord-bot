@@ -6,10 +6,17 @@ const { google } = require('googleapis');
 // ================= CONFIG =================
 const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
-const DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
-const COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
-const USER_DATA_FILE = path.join(__dirname, "data", "userData.json");
 const BACKUP_LIMIT = 10; // how many backups to keep
+
+// Multi-server support
+const SUPPORT_MULTI_SERVER = process.env.SUPPORT_MULTI_SERVER !== 'false'; // Set to false to disable multi-server support
+const GLOBAL_DATA_DIR = path.join(__dirname, "data", "global");
+const SERVER_DATA_DIR = path.join(__dirname, "data", "servers");
+
+// Legacy single-server file paths (for backward compatibility)
+const LEGACY_DATA_FILE = path.join(__dirname, "data", "bridgeList.json");
+const LEGACY_COMMAND_LOG_FILE = path.join(__dirname, "data", "commandLog.json");
+const LEGACY_USER_DATA_FILE = path.join(__dirname, "data", "userData.json");
 
 // Google Drive Config
 const GOOGLE_DRIVE_FILE_ID = process.env.GOOGLE_DRIVE_FILE_ID; // File ID for userData backup
@@ -25,97 +32,202 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-// Ensure data folder exists
+// Ensure data folders exist
 if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirname, "data"));
+if (SUPPORT_MULTI_SERVER) {
+    if (!fs.existsSync(GLOBAL_DATA_DIR)) fs.mkdirSync(GLOBAL_DATA_DIR);
+    if (!fs.existsSync(SERVER_DATA_DIR)) fs.mkdirSync(SERVER_DATA_DIR);
+}
 
-// Load bridge list
+// ----------------- SERVER DATA HELPERS -----------------
+function getServerDataDir(guildId) {
+    if (!SUPPORT_MULTI_SERVER) {
+        return path.join(__dirname, "data");
+    }
+    const serverDir = path.join(SERVER_DATA_DIR, `server_${guildId}`);
+    if (!fs.existsSync(serverDir)) {
+        fs.mkdirSync(serverDir, { recursive: true });
+        fs.mkdirSync(path.join(serverDir, "backups"), { recursive: true });
+    }
+    return serverDir;
+}
+
+function getServerDataFiles(guildId) {
+    const serverDir = getServerDataDir(guildId);
+    return {
+        bridgeList: path.join(serverDir, "bridgeList.json"),
+        userData: path.join(serverDir, "userData.json"),
+        commandLog: path.join(serverDir, "commandLog.json"),
+        backupsDir: path.join(serverDir, "backups")
+    };
+}
+
+// Global data storage (will be replaced with server-specific data)
 let bridgeList = [];
-try { 
-    if (fs.existsSync(DATA_FILE)) {
-        bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-        console.log(`📁 Loaded ${bridgeList.length} bridges from local file`);
-    } else {
-        console.log("📁 No local bridge file found, starting with empty list");
-    }
-} 
-catch (err) { console.log("Error reading bridge list file:", err); }
-
-// Load command log
 let commandLog = {};
-try { if (fs.existsSync(COMMAND_LOG_FILE)) commandLog = JSON.parse(fs.readFileSync(COMMAND_LOG_FILE, "utf8")); } 
-catch (err) { console.error("❌ Error reading command log file:", err); }
-
-// Load user data
 let userData = {};
-try { 
-    if (fs.existsSync(USER_DATA_FILE)) {
-        userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8"));
-        console.log(`📁 Loaded ${Object.keys(userData).length} users from local file`);
-    } else {
-        console.log("📁 No local user data file found, starting with empty data");
+
+// Load server-specific data
+function loadServerData(guildId) {
+    if (!SUPPORT_MULTI_SERVER) {
+        // Legacy single-server mode
+        loadLegacyData();
+        return;
     }
-} 
-catch (err) { console.error("❌ Error reading user data file:", err); }
+    
+    const files = getServerDataFiles(guildId);
+    
+    // Load bridge list
+    try { 
+        if (fs.existsSync(files.bridgeList)) {
+            bridgeList = JSON.parse(fs.readFileSync(files.bridgeList, "utf8"));
+            console.log(`📁 [Server ${guildId}] Loaded ${bridgeList.length} bridges from local file`);
+        } else {
+            bridgeList = [];
+            console.log(`📁 [Server ${guildId}] No local bridge file found, starting with empty list`);
+        }
+    } 
+    catch (err) { console.log(`Error reading bridge list file for server ${guildId}:`, err); }
+
+    // Load command log
+    try { 
+        if (fs.existsSync(files.commandLog)) {
+            commandLog = JSON.parse(fs.readFileSync(files.commandLog, "utf8"));
+        } else {
+            commandLog = {};
+        }
+    } 
+    catch (err) { console.error(`❌ Error reading command log file for server ${guildId}:`, err); }
+
+    // Load user data
+    try { 
+        if (fs.existsSync(files.userData)) {
+            userData = JSON.parse(fs.readFileSync(files.userData, "utf8"));
+            console.log(`📁 [Server ${guildId}] Loaded ${Object.keys(userData).length} users from local file`);
+        } else {
+            userData = {};
+            console.log(`📁 [Server ${guildId}] No local user data file found, starting with empty data`);
+        }
+    } 
+    catch (err) { console.error(`❌ Error reading user data file for server ${guildId}:`, err); }
+}
+
+// Load legacy single-server data
+function loadLegacyData() {
+    // Load bridge list
+    try { 
+        if (fs.existsSync(LEGACY_DATA_FILE)) {
+            bridgeList = JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, "utf8"));
+            console.log(`📁 Loaded ${bridgeList.length} bridges from legacy file`);
+        } else {
+            bridgeList = [];
+            console.log(`📁 No legacy bridge file found, starting with empty list`);
+        }
+    } 
+    catch (err) { console.log("Error reading legacy bridge list file:", err); }
+
+    // Load command log
+    try { 
+        if (fs.existsSync(LEGACY_COMMAND_LOG_FILE)) {
+            commandLog = JSON.parse(fs.readFileSync(LEGACY_COMMAND_LOG_FILE, "utf8"));
+        } else {
+            commandLog = {};
+        }
+    } 
+    catch (err) { console.error("❌ Error reading legacy command log file:", err); }
+
+    // Load user data
+    try { 
+        if (fs.existsSync(LEGACY_USER_DATA_FILE)) {
+            userData = JSON.parse(fs.readFileSync(LEGACY_USER_DATA_FILE, "utf8"));
+            console.log(`📁 Loaded ${Object.keys(userData).length} users from legacy file`);
+        } else {
+            userData = {};
+            console.log(`📁 No legacy user data file found, starting with empty data`);
+        }
+    } 
+    catch (err) { console.error("❌ Error reading legacy user data file:", err); }
+}
 
 let lastListMessages = [];
 
 // ----------------- SAVE FUNCTIONS -----------------
 
-function saveCommandLog() {
+function saveCommandLog(guildId) {
     try { 
-        // Ensure data directory exists
-        if (!fs.existsSync(path.join(__dirname, "data"))) {
-            fs.mkdirSync(path.join(__dirname, "data"));
+        if (!SUPPORT_MULTI_SERVER) {
+            fs.writeFileSync(LEGACY_COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8");
+        } else {
+            const files = getServerDataFiles(guildId);
+            fs.writeFileSync(files.commandLog, JSON.stringify(commandLog, null, 2), "utf8");
         }
-        
-        fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); 
     }
-    catch (err) { console.error("❌ Error saving command log file:", err); }
+    catch (err) { console.error(`❌ Error saving command log file:`, err); }
 }
 
-function saveUserData() {
+function saveUserData(guildId) {
     try { 
-        // Ensure data directory exists
-        if (!fs.existsSync(path.join(__dirname, "data"))) {
-            fs.mkdirSync(path.join(__dirname, "data"));
+        if (!SUPPORT_MULTI_SERVER) {
+            fs.writeFileSync(LEGACY_USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
+            backupToGoogleDrive('legacy');
+        } else {
+            const files = getServerDataFiles(guildId);
+            fs.writeFileSync(files.userData, JSON.stringify(userData, null, 2), "utf8");
+            backupToGoogleDrive(guildId);
         }
-        
-        fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
-        // Also backup to Google Drive
-        backupToGoogleDrive();
     }
-    catch (err) { console.error("❌ Error saving user data file:", err); }
+    catch (err) { console.error(`❌ Error saving user data file:`, err); }
 }
 
-function saveBridgeList() {
+function saveBridgeList(guildId) {
     try {
-        // Ensure data directory exists
-        if (!fs.existsSync(path.join(__dirname, "data"))) {
-            fs.mkdirSync(path.join(__dirname, "data"));
-        }
-        
-        fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
+        if (!SUPPORT_MULTI_SERVER) {
+            // Legacy mode
+            fs.writeFileSync(LEGACY_DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
+            
+            if(bridgeList.length > 0){
+                const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
+                fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
+                console.log(`💾 Created legacy backup: ${backupFile}`);
 
-        if(bridgeList.length > 0){
-            const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
-            fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
-            console.log(`💾 Created local backup: ${backupFile}`);
-
-            const files = fs.readdirSync(path.join(__dirname, "data"))
-                .filter(f => f.startsWith("bridgeList-"))
-                .sort((a, b) => fs.statSync(path.join(__dirname,"data",a)).mtimeMs -
-                                fs.statSync(path.join(__dirname,"data",b)).mtimeMs);
-            console.log(`📁 Found ${files.length} backup files`);
-            while (files.length > BACKUP_LIMIT) {
-                const fileToDelete = files.shift();
-                fs.unlinkSync(path.join(__dirname,"data",fileToDelete));
-                console.log(`🗑️ Deleted old backup: ${fileToDelete}`);
+                const backupFiles = fs.readdirSync(path.join(__dirname, "data"))
+                    .filter(f => f.startsWith("bridgeList-"))
+                    .sort((a, b) => fs.statSync(path.join(__dirname, "data", a)).mtimeMs -
+                                    fs.statSync(path.join(__dirname, "data", b)).mtimeMs);
+                console.log(`📁 Found ${backupFiles.length} legacy backup files`);
+                while (backupFiles.length > BACKUP_LIMIT) {
+                    const fileToDelete = backupFiles.shift();
+                    fs.unlinkSync(path.join(__dirname, "data", fileToDelete));
+                    console.log(`🗑️ Deleted old legacy backup: ${fileToDelete}`);
+                }
             }
+            
+            backupToGoogleDrive('legacy');
+        } else {
+            // Multi-server mode
+            const files = getServerDataFiles(guildId);
+            fs.writeFileSync(files.bridgeList, JSON.stringify(bridgeList, null, 2), "utf8");
+
+            if(bridgeList.length > 0){
+                const backupFile = path.join(files.backupsDir, `bridgeList-${Date.now()}.json`);
+                fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
+                console.log(`💾 [Server ${guildId}] Created local backup: ${backupFile}`);
+
+                const backupFiles = fs.readdirSync(files.backupsDir)
+                    .filter(f => f.startsWith("bridgeList-"))
+                    .sort((a, b) => fs.statSync(path.join(files.backupsDir, a)).mtimeMs -
+                                    fs.statSync(path.join(files.backupsDir, b)).mtimeMs);
+                console.log(`📁 [Server ${guildId}] Found ${backupFiles.length} backup files`);
+                while (backupFiles.length > BACKUP_LIMIT) {
+                    const fileToDelete = backupFiles.shift();
+                    fs.unlinkSync(path.join(files.backupsDir, fileToDelete));
+                    console.log(`🗑️ [Server ${guildId}] Deleted old backup: ${fileToDelete}`);
+                }
+            }
+            
+            backupToGoogleDrive(guildId);
         }
-        
-        // Also backup to Google Drive
-        backupToGoogleDrive();
-    } catch (err) { console.log("Error saving bridge list:", err); }
+    } catch (err) { console.log(`Error saving bridge list:`, err); }
 }
 
 // ----------------- GOOGLE DRIVE FUNCTIONS -----------------
@@ -162,17 +274,41 @@ async function initializeGoogleDrive() {
     }
 }
 
-async function backupToGoogleDrive() {
+async function backupToGoogleDrive(guildId) {
     if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return;
     
     try {
         const sheets = google.sheets({ version: 'v4', auth: driveAuth });
         
-        // Create combined backup data
-        const backupData = {
+        // Load existing multi-server data
+        let allServerData = {};
+        try {
+            const response = await sheets.spreadsheets.values.get({
+                spreadsheetId: GOOGLE_DRIVE_FILE_ID,
+                range: 'A1'
+            });
+            
+            if (response.data.values && response.data.values[0] && response.data.values[0][0]) {
+                const existingData = JSON.parse(response.data.values[0][0]);
+                if (existingData.servers) {
+                    allServerData = existingData.servers;
+                }
+            }
+        } catch (err) {
+            console.log("No existing data found, starting fresh");
+        }
+        
+        // Update current server data
+        allServerData[guildId] = {
             userData: userData,
             bridgeList: bridgeList,
             lastBackup: Date.now()
+        };
+        
+        // Create combined backup data
+        const backupData = {
+            servers: allServerData,
+            lastGlobalBackup: Date.now()
         };
         
         // Write combined JSON data to cell A1
@@ -185,9 +321,9 @@ async function backupToGoogleDrive() {
             }
         });
         
-        console.log("✅ Combined data (user + bridge) backed up to Google Drive");
+        console.log(`✅ [Server ${guildId}] Data backed up to Google Drive`);
     } catch (err) {
-        console.error("❌ Failed to backup to Google Drive:", err.message);
+        console.error(`❌ Failed to backup server ${guildId} to Google Drive:`, err.message);
     }
 }
 
@@ -242,7 +378,7 @@ async function restoreFromGoogleDrive() {
                         bridgeList = cloudData.bridgeList;
                         console.log(`✅ Bridge list restored from combined backup (${bridgeList.length} bridges)`);
                         // Save the restored bridge data locally (this will create local backup files)
-                        saveBridgeList();
+                        saveBridgeList(guildId);
                     } else {
                         console.log("ℹ️ Local bridge data is newer, keeping local version");
                     }
@@ -290,7 +426,7 @@ function updateUserData(userId, username, type, value) {
     userData[userId][type] = value;
     userData[userId].lastUpdated = Date.now();
     
-    saveUserData();
+    saveUserData(guildId);
 }
 
 function formatUserStats(userId) {
@@ -466,9 +602,22 @@ client.on("messageCreate", async (message) => {
     const content = message.content;
     const now = Date.now();
     const userId = message.author.id;
+    const guildId = message.guild?.id || 'dm';
+    
+    // Load server-specific data
+    if (SUPPORT_MULTI_SERVER && message.guild) {
+        loadServerData(guildId);
+    } else if (!SUPPORT_MULTI_SERVER) {
+        // Load legacy data once at startup
+        if (!global.legacyDataLoaded) {
+            loadLegacyData();
+            global.legacyDataLoaded = true;
+        }
+    }
+    
     if (!commandLog[userId]) commandLog[userId] = [];
     
-    console.log(`📨 Processing message: "${content}" from ${message.author.username}`);
+    console.log(`📨 [Server ${guildId}] Processing message: "${content}" from ${message.author.username}`);
 
     // ----------------- COMMANDS -----------------
     if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
@@ -487,7 +636,7 @@ client.on("messageCreate", async (message) => {
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-            saveCommandLog();
+            saveCommandLog(guildId);
             
             try {
                 const reply = await message.reply(`✅ Updated your troop count to **${troopCount.toLocaleString()}**`);
@@ -516,7 +665,7 @@ client.on("messageCreate", async (message) => {
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-            saveCommandLog();
+            saveCommandLog(guildId);
             
             try {
                 const reply = await message.reply(`✅ Updated your silver info to: **${silverText}**`);
@@ -559,7 +708,7 @@ client.on("messageCreate", async (message) => {
         
         commandLog[userId].push({command: "!mystats", timestamp: now});
         commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         
         setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
@@ -589,7 +738,7 @@ client.on("messageCreate", async (message) => {
         
         commandLog[userId].push({command: "!allstats", timestamp: now});
         commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         
         setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
@@ -610,6 +759,7 @@ client.on("messageCreate", async (message) => {
             `• \`!listme\` - Get bridge list via DM\n` +
             `• \`!backups\`, \`!restore <number>\` - Manage local backups\n` +
             `• \`!backup\` - Backup to Google Drive\n` +
+            `• \`!mode\` - Show current bot mode\n` +
             `• \`!viewlog\` - View command history\n` +
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
             `**Examples:**\n` +
@@ -638,12 +788,12 @@ client.on("messageCreate", async (message) => {
         if(num>0 && num<=bridgeList.length){
             let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
             bridgeList[num-1].color=color;
-            saveBridgeList();
+            saveBridgeList(guildId);
             try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         }
         commandLog[userId].push({command:content,timestamp:now});
         commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
@@ -653,11 +803,11 @@ client.on("messageCreate", async (message) => {
         const num = parseInt(content.split(" ")[1]);
         if(!isNaN(num) && num>=1 && num<=bridgeList.length){
             bridgeList.splice(num-1,1);
-            saveBridgeList();
+            saveBridgeList(guildId);
             try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
             commandLog[userId].push({command:content,timestamp:now});
             commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-            saveCommandLog();
+            saveCommandLog(guildId);
         }
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -667,26 +817,39 @@ client.on("messageCreate", async (message) => {
     if(content === "!clearlist" || content === "!listclear"){
         const count = bridgeList.length;
         bridgeList = [];
-        saveBridgeList();
+        saveBridgeList(guildId);
         try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
     }
 
     // -------- BACKUPS --------
     if(content.startsWith("!backups")){
-        const files = fs.readdirSync(path.join(__dirname,"data"))
-            .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-        if(files.length===0){
+        let backupFiles = [];
+        let backupDir = "";
+        
+        if (SUPPORT_MULTI_SERVER) {
+            const files = getServerDataFiles(guildId);
+            backupDir = files.backupsDir;
+            backupFiles = fs.readdirSync(files.backupsDir)
+                .filter(f => f.startsWith("bridgeList-"))
+                .sort((a,b) => fs.statSync(path.join(files.backupsDir,b)).mtimeMs - fs.statSync(path.join(files.backupsDir,a)).mtimeMs);
+        } else {
+            backupDir = path.join(__dirname, "data");
+            backupFiles = fs.readdirSync(path.join(__dirname, "data"))
+                .filter(f => f.startsWith("bridgeList-"))
+                .sort((a,b) => fs.statSync(path.join(__dirname, "data", b)).mtimeMs - fs.statSync(path.join(__dirname, "data", a)).mtimeMs);
+        }
+        
+        if(backupFiles.length===0){
             try { await message.reply("No backups available."); } catch(err) { console.error(err); }
             return;
         }
-        const list = files.map((f,i)=>{
-            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",f),"utf8"));
+        const list = backupFiles.map((f,i)=>{
+            const data = JSON.parse(fs.readFileSync(path.join(backupDir,f),"utf8"));
             const timestamp = parseInt(f.match(/bridgeList-(\d+)\.json/)[1],10);
             const date = new Date(timestamp);
             const formatted = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()} ${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`;
@@ -703,21 +866,35 @@ client.on("messageCreate", async (message) => {
     if(content.startsWith("!restore")){
         const arg = parseInt(content.split(" ")[1]);
         if(isNaN(arg) || arg<1) return;
-        const files = fs.readdirSync(path.join(__dirname,"data"))
-            .filter(f => f.startsWith("bridgeList-"))
-            .sort((a,b) => fs.statSync(path.join(__dirname,"data",b)).mtimeMs - fs.statSync(path.join(__dirname,"data",a)).mtimeMs);
-        if(arg>files.length) return;
-        const chosenFile = files[arg-1];
+        
+        let backupFiles = [];
+        let backupDir = "";
+        
+        if (SUPPORT_MULTI_SERVER) {
+            const files = getServerDataFiles(guildId);
+            backupDir = files.backupsDir;
+            backupFiles = fs.readdirSync(files.backupsDir)
+                .filter(f => f.startsWith("bridgeList-"))
+                .sort((a,b) => fs.statSync(path.join(files.backupsDir,b)).mtimeMs - fs.statSync(path.join(files.backupsDir,a)).mtimeMs);
+        } else {
+            backupDir = path.join(__dirname, "data");
+            backupFiles = fs.readdirSync(path.join(__dirname, "data"))
+                .filter(f => f.startsWith("bridgeList-"))
+                .sort((a,b) => fs.statSync(path.join(__dirname, "data", b)).mtimeMs - fs.statSync(path.join(__dirname, "data", a)).mtimeMs);
+        }
+        
+        if(arg>backupFiles.length) return;
+        const chosenFile = backupFiles[arg-1];
         if(!chosenFile) return;
         try {
-            const data = JSON.parse(fs.readFileSync(path.join(__dirname,"data",chosenFile),"utf8"));
+            const data = JSON.parse(fs.readFileSync(path.join(backupDir,chosenFile),"utf8"));
             bridgeList = data;
-            saveBridgeList();
+            saveBridgeList(guildId);
         } catch(err){ console.error(err); return; }
         try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
         commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         try { await message.reply(`✅ Bridge list restored from backup [${arg}] (${bridgeList.length} bridges)`); } catch(err){ console.error(err); }
         return;
     }
@@ -764,7 +941,7 @@ client.on("messageCreate", async (message) => {
         await cleanChannel(message.channel);
         commandLog[userId].push({command:"!cleanup", timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         try { const reply = await message.reply("✅ Channel cleanup completed!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -773,12 +950,24 @@ client.on("messageCreate", async (message) => {
     // -------- BACKUP --------
     if(content.toLowerCase() === "!backup"){
         console.log(`💾 Manual backup requested by ${message.author.tag}`);
-        await backupToGoogleDrive();
+        await backupToGoogleDrive(guildId);
         commandLog[userId].push({command:"!backup", timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-        saveCommandLog();
+        saveCommandLog(guildId);
         try { const reply = await message.reply("✅ Data backed up to Google Drive!"); setTimeout(async()=>{try{await reply.delete()}catch{}},5000); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
+        return;
+    }
+
+    // -------- MODE --------
+    if(content.toLowerCase() === "!mode"){
+        const mode = SUPPORT_MULTI_SERVER ? "Multi-Server" : "Single-Server (Legacy)";
+        const serverInfo = SUPPORT_MULTI_SERVER ? `\nCurrent Server: ${guildId}` : "";
+        try { 
+            const reply = await message.reply(`🤖 **Bot Mode:** ${mode}${serverInfo}\n\n**Data Storage:** ${SUPPORT_MULTI_SERVER ? 'Server-specific folders' : 'Single shared folder'}\n**Google Drive:** ${SUPPORT_MULTI_SERVER ? 'Multi-server backup' : 'Single backup'}`);
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
+        } catch(err) { console.error(err); }
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
     }
 
@@ -840,8 +1029,8 @@ client.on("messageCreate", async (message) => {
     if (bridgesAdded > 0) {
         commandLog[userId].push({ command: `Added ${bridgesAdded} bridge${bridgesAdded > 1 ? "s" : ""}`, timestamp: now });
         commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-        saveCommandLog();
-        saveBridgeList();
+        saveCommandLog(guildId);
+        saveBridgeList(guildId);
 
         // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
         console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed ID: ${ALLOWED_CHANNEL_ID}, Match: ${message.channel.id === ALLOWED_CHANNEL_ID}`);
