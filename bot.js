@@ -4,7 +4,10 @@ const path = require("path");
 const { google } = require('googleapis');
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_ID = "1407022766967881759"; // Replace with your channel ID
+const ALLOWED_CHANNEL_IDS = [
+    "1407022766967881759", // Original server channel
+    "1425905524553158826"  // New server channel
+];
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const BACKUP_LIMIT = 10; // how many backups to keep
 
@@ -545,8 +548,8 @@ function splitMessage(entries, maxLength = 1900) {
 // ----------------- CLEAN & UPDATE -----------------
 async function cleanChannel(channel) {
     try {
-        // Only clean the allowed channel where bridge list is maintained
-        if (channel.id !== ALLOWED_CHANNEL_ID) return;
+        // Only clean the allowed channels where bridge list is maintained
+        if (!ALLOWED_CHANNEL_IDS.includes(channel.id)) return;
         
         // Only clean if we have valid list messages to preserve
         if (lastListMessages.length === 0) return;
@@ -621,8 +624,8 @@ async function updateBridgeListMessage(channel) {
         }
     }
 
-    // Clean channel more frequently when in the allowed channel
-    if (channel.id === ALLOWED_CHANNEL_ID) {
+    // Clean channel more frequently when in an allowed channel
+    if (ALLOWED_CHANNEL_IDS.includes(channel.id)) {
         if (Math.random() < 0.3) { // 30% chance to clean in allowed channel
             await cleanChannel(channel);
         }
@@ -638,20 +641,31 @@ client.once("ready", async () => {
     
     // Note: Google Drive restore will happen when first message is processed per server
     
-    try {
-        const channel = await client.channels.fetch(ALLOWED_CHANNEL_ID);
-        if (!channel) return console.error("❌ Could not find channel for bridge list");
+    // Initialize bridge list messages for all allowed channels
+    for (const channelId of ALLOWED_CHANNEL_IDS) {
+        try {
+            const channel = await client.channels.fetch(channelId);
+            if (!channel) {
+                console.error(`❌ Could not find channel ${channelId}`);
+                continue;
+            }
 
-        const messages = await channel.messages.fetch({ limit: 100 });
-        const listMessages = messages
-            .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
-            .sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
+            const messages = await channel.messages.fetch({ limit: 100 });
+            const listMessages = messages
+                .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
+                .sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
 
-        if (listMessages.size>0) {
-            lastListMessages = Array.from(listMessages.values());
-            await updateBridgeListMessage(channel);
-        } else await updateBridgeListMessage(channel);
-    } catch (err) { console.error("❌ Error during startup sync:", err); }
+            if (listMessages.size>0) {
+                lastListMessages = Array.from(listMessages.values());
+                await updateBridgeListMessage(channel);
+            } else {
+                await updateBridgeListMessage(channel);
+            }
+            console.log(`✅ Initialized bridge list for channel ${channelId}`);
+        } catch (err) { 
+            console.error(`❌ Error initializing channel ${channelId}:`, err); 
+        }
+    }
 });
 
 // ----------------- MESSAGE HANDLER -----------------
@@ -679,7 +693,7 @@ client.on("messageCreate", async (message) => {
     console.log(`📨 [Server ${guildId}] Processing message: "${content}" from ${message.author.username}`);
 
     // ----------------- COMMANDS -----------------
-    if (message.channel.id !== ALLOWED_CHANNEL_ID && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
+    if (!ALLOWED_CHANNEL_IDS.includes(message.channel.id) && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
         try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -1092,8 +1106,8 @@ client.on("messageCreate", async (message) => {
         saveBridgeList(guildId);
 
         // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
-        console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed ID: ${ALLOWED_CHANNEL_ID}, Match: ${message.channel.id === ALLOWED_CHANNEL_ID}`);
-        if (message.channel.id === ALLOWED_CHANNEL_ID) {
+        console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed IDs: ${ALLOWED_CHANNEL_IDS.join(', ')}, Match: ${ALLOWED_CHANNEL_IDS.includes(message.channel.id)}`);
+        if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
             console.log(`🗑️ Attempting to delete user message with bridge link`);
             try { 
                 await message.delete(); 
