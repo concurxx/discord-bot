@@ -425,6 +425,8 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
                             }
                         }
                         console.log(`✅ [Server ${guildId}] User data restored from multi-server backup`);
+                        // Save the restored user data locally
+                        saveUserData(guildId);
                     }
                     
                     // Restore bridge data
@@ -464,6 +466,8 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
                             }
                         }
                         console.log("✅ User data restored from legacy combined backup");
+                        // Save the restored user data locally
+                        saveUserData(guildId);
                     }
                     
                     // Restore bridge data
@@ -500,6 +504,8 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
                         }
                     }
                     console.log("✅ User data restored from legacy user-only backup");
+                    // Save the restored user data locally
+                    saveUserData(guildId);
                 } else {
                     console.log(`ℹ️ Skipping legacy user-only data restore for server ${guildId} in multi-server mode`);
                 }
