@@ -30,7 +30,14 @@ if (!fs.existsSync(path.join(__dirname, "data"))) fs.mkdirSync(path.join(__dirna
 
 // Load bridge list
 let bridgeList = [];
-try { if (fs.existsSync(DATA_FILE)) bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } 
+try { 
+    if (fs.existsSync(DATA_FILE)) {
+        bridgeList = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+        console.log(`📁 Loaded ${bridgeList.length} bridges from local file`);
+    } else {
+        console.log("📁 No local bridge file found, starting with empty list");
+    }
+} 
 catch (err) { console.log("Error reading bridge list file:", err); }
 
 // Load command log
@@ -40,7 +47,14 @@ catch (err) { console.error("❌ Error reading command log file:", err); }
 
 // Load user data
 let userData = {};
-try { if (fs.existsSync(USER_DATA_FILE)) userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8")); } 
+try { 
+    if (fs.existsSync(USER_DATA_FILE)) {
+        userData = JSON.parse(fs.readFileSync(USER_DATA_FILE, "utf8"));
+        console.log(`📁 Loaded ${Object.keys(userData).length} users from local file`);
+    } else {
+        console.log("📁 No local user data file found, starting with empty data");
+    }
+} 
 catch (err) { console.error("❌ Error reading user data file:", err); }
 
 let lastListMessages = [];
@@ -48,12 +62,24 @@ let lastListMessages = [];
 // ----------------- SAVE FUNCTIONS -----------------
 
 function saveCommandLog() {
-    try { fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); }
+    try { 
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
+        fs.writeFileSync(COMMAND_LOG_FILE, JSON.stringify(commandLog, null, 2), "utf8"); 
+    }
     catch (err) { console.error("❌ Error saving command log file:", err); }
 }
 
 function saveUserData() {
     try { 
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
         fs.writeFileSync(USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
         // Also backup to Google Drive
         backupToGoogleDrive();
@@ -63,17 +89,28 @@ function saveUserData() {
 
 function saveBridgeList() {
     try {
+        // Ensure data directory exists
+        if (!fs.existsSync(path.join(__dirname, "data"))) {
+            fs.mkdirSync(path.join(__dirname, "data"));
+        }
+        
         fs.writeFileSync(DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
 
         if(bridgeList.length > 0){
             const backupFile = path.join(__dirname, "data", `bridgeList-${Date.now()}.json`);
             fs.writeFileSync(backupFile, JSON.stringify(bridgeList, null, 2), "utf8");
+            console.log(`💾 Created local backup: ${backupFile}`);
 
             const files = fs.readdirSync(path.join(__dirname, "data"))
                 .filter(f => f.startsWith("bridgeList-"))
                 .sort((a, b) => fs.statSync(path.join(__dirname,"data",a)).mtimeMs -
                                 fs.statSync(path.join(__dirname,"data",b)).mtimeMs);
-            while (files.length > BACKUP_LIMIT) fs.unlinkSync(path.join(__dirname,"data",files.shift()));
+            console.log(`📁 Found ${files.length} backup files`);
+            while (files.length > BACKUP_LIMIT) {
+                const fileToDelete = files.shift();
+                fs.unlinkSync(path.join(__dirname,"data",fileToDelete));
+                console.log(`🗑️ Deleted old backup: ${fileToDelete}`);
+            }
         }
         
         // Also backup to Google Drive
@@ -182,6 +219,7 @@ async function restoreFromGoogleDrive() {
             if (cloudData.userData && cloudData.bridgeList) {
                 // New combined format
                 console.log("📦 Detected combined backup format");
+                console.log(`📊 Cloud data: ${Object.keys(cloudData.userData).length} users, ${cloudData.bridgeList.length} bridges`);
                 
                 // Restore user data
                 if (cloudData.userData) {
@@ -197,11 +235,14 @@ async function restoreFromGoogleDrive() {
                 
                 // Restore bridge data
                 if (cloudData.bridgeList && Array.isArray(cloudData.bridgeList)) {
+                    console.log(`🔍 Local bridge count: ${bridgeList.length}, Cloud bridge count: ${cloudData.bridgeList.length}`);
                     // Only restore if local bridge list is empty or cloud data is newer
                     if (bridgeList.length === 0 || 
                         (cloudData.lastBackup && cloudData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
                         bridgeList = cloudData.bridgeList;
                         console.log(`✅ Bridge list restored from combined backup (${bridgeList.length} bridges)`);
+                        // Save the restored bridge data locally (this will create local backup files)
+                        saveBridgeList();
                     } else {
                         console.log("ℹ️ Local bridge data is newer, keeping local version");
                     }
@@ -210,6 +251,7 @@ async function restoreFromGoogleDrive() {
             } else {
                 // Old user-only format - backward compatibility
                 console.log("📦 Detected legacy user-only backup format");
+                console.log(`📊 Legacy data: ${Object.keys(cloudData).length} users`);
                 
                 // Merge cloud data with local data, preferring newer timestamps
                 for (const userId in cloudData) {
@@ -256,7 +298,7 @@ function formatUserStats(userId) {
     if (!user) return null;
     
     const troops = user.troops !== null ? user.troops.toLocaleString() : "Not set";
-    const silver = user.silver !== null ? `${user.silver} city` : "Not set";
+    const silver = user.silver !== null ? user.silver : "Not set";
     const lastUpdated = user.lastUpdated ? `<t:${Math.floor(user.lastUpdated / 1000)}:R>` : "Unknown";
     
     return `**${user.username}**\n🏰 Troops: ${troops}\n💰 Silver: ${silver}\n📅 Last updated: ${lastUpdated}`;
@@ -271,7 +313,7 @@ function formatAllStats() {
     
     return users.map(([userId, user]) => {
         const troops = user.troops !== null ? user.troops.toLocaleString() : "❌";
-        const silver = user.silver !== null ? `${user.silver} city` : "❌";
+        const silver = user.silver !== null ? user.silver : "❌";
         const lastUpdated = user.lastUpdated ? `<t:${Math.floor(user.lastUpdated / 1000)}:R>` : "❓";
         
         return `**${user.username}** | 🏰 ${troops} | 💰 ${silver} | ${lastUpdated}`;
@@ -467,17 +509,17 @@ client.on("messageCreate", async (message) => {
     // -------- SILVER COMMAND --------
     if (content.toLowerCase().startsWith('!silver ')) {
         console.log(`✅ Silver command matched!`);
-        const parts = content.toLowerCase().split(' ');
-        if (parts.length === 3 && /^\d+$/.test(parts[1]) && parts[2] === 'city') {
-            const silverCapacity = parseInt(parts[1], 10);
-            updateUserData(userId, message.author.username, 'silver', silverCapacity);
+        const silverText = content.substring(8).trim(); // Get everything after "!silver "
+        
+        if (silverText.length > 0) {
+            updateUserData(userId, message.author.username, 'silver', silverText);
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
             saveCommandLog();
             
             try {
-                const reply = await message.reply(`✅ Updated your silver capacity to **${silverCapacity} city**`);
+                const reply = await message.reply(`✅ Updated your silver info to: **${silverText}**`);
                 setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
             } catch(err) { console.error(err); }
             
@@ -485,7 +527,7 @@ client.on("messageCreate", async (message) => {
             return;
         } else {
             try {
-                const reply = await message.reply(`❌ Invalid format. Use: \`!silver <number> city\` (e.g., \`!silver 1 city\`)`);
+                const reply = await message.reply(`❌ Please provide silver information. Use: \`!silver <your silver info>\` (e.g., \`!silver 1 castle 2 forts 3 cities\`)`);
                 setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
             } catch(err) { console.error(err); }
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
@@ -558,7 +600,7 @@ client.on("messageCreate", async (message) => {
         const helpText = `**Available Commands:**\n\n` +
             `**User Data Commands:**\n` +
             `• \`!troops <number>\` - Set your troop count\n` +
-            `• \`!silver <number> city\` - Set your silver capacity\n` +
+            `• \`!silver <your silver info>\` - Set your silver information\n` +
             `• \`!mystats\` - View your current stats\n` +
             `• \`!allstats\` - View all users' stats\n\n` +
             `**Bridge List Commands:** *(Allowed channel only)*\n` +
@@ -572,7 +614,7 @@ client.on("messageCreate", async (message) => {
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
             `**Examples:**\n` +
             `• \`!troops 40000\` - Sets your troops to 40,000\n` +
-            `• \`!silver 1 city\` - Sets your silver capacity to 1 city`;
+            `• \`!silver 1 castle 2 forts 3 cities\` - Sets your silver info`;
         
         try {
             await message.author.send(helpText);
