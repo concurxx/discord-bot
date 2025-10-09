@@ -164,7 +164,7 @@ function loadLegacyData() {
     }
 }
 
-let lastListMessages = [];
+let lastListMessages = {}; // Channel ID -> array of messages
 
 // ----------------- SAVE FUNCTIONS -----------------
 
@@ -552,7 +552,8 @@ async function cleanChannel(channel) {
         if (!ALLOWED_CHANNEL_IDS.includes(channel.id)) return;
         
         // Only clean if we have valid list messages to preserve
-        if (lastListMessages.length === 0) return;
+        const channelMessages = lastListMessages[channel.id] || [];
+        if (channelMessages.length === 0) return;
         
         console.log(`🧹 Starting channel cleanup in allowed channel`);
         
@@ -567,7 +568,7 @@ async function cleanChannel(channel) {
         
         const toDelete = messages.filter(m => {
             if (m.author.id !== client.user.id) return false;
-            if (lastListMessages.some(l => l.id === m.id)) return false;
+            if (channelMessages.some(l => l.id === m.id)) return false;
             
             const isRecentDuplicate = m.createdTimestamp > fiveMinutesAgo;
             const isOldDuplicate = m.createdTimestamp < fiveMinutesAgo && m.createdTimestamp > oneHourAgo;
@@ -595,32 +596,36 @@ async function cleanChannel(channel) {
 }
 
 async function updateBridgeListMessage(channel) {
+    const channelId = channel.id;
+    const channelMessages = lastListMessages[channelId] || [];
+    
     if (bridgeList.length === 0) {
-        if (lastListMessages.length > 0) {
+        if (channelMessages.length > 0) {
             try {
-                await lastListMessages[0].edit("Bridge list is currently empty.");
-                for (let i = 1; i < lastListMessages.length; i++) try { await lastListMessages[i].delete(); } catch {}
-                lastListMessages = [lastListMessages[0]];
-            } catch { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } }
-        } else { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages = [msg]; } catch(err){ console.error(err); } }
+                await channelMessages[0].edit("Bridge list is currently empty.");
+                for (let i = 1; i < channelMessages.length; i++) try { await channelMessages[i].delete(); } catch {}
+                lastListMessages[channelId] = [channelMessages[0]];
+            } catch { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages[channelId] = [msg]; } catch(err){ console.error(err); } }
+        } else { try { const msg = await channel.send("Bridge list is currently empty."); lastListMessages[channelId] = [msg]; } catch(err){ console.error(err); } }
         return;
     }
 
     const entries = formatBridgeList(true);
     const chunks = splitMessage(entries);
 
-    if (chunks.length === lastListMessages.length) {
+    if (chunks.length === channelMessages.length) {
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
-            try { await lastListMessages[i].edit(header + chunks[i]); } 
-            catch { try { lastListMessages[i] = await channel.send(header + chunks[i]); } catch(err){ console.error(err); } }
+            try { await channelMessages[i].edit(header + chunks[i]); } 
+            catch { try { channelMessages[i] = await channel.send(header + chunks[i]); } catch(err){ console.error(err); } }
         }
+        lastListMessages[channelId] = channelMessages;
     } else {
-        for (const msg of lastListMessages) try { await msg.delete(); } catch {}
-        lastListMessages = [];
+        for (const msg of channelMessages) try { await msg.delete(); } catch {}
+        lastListMessages[channelId] = [];
         for (let i = 0; i < chunks.length; i++) {
             const header = i === 0 ? "**Bridge List:**\n\n" : `**Bridge List (Part ${i+1}):**\n\n`;
-            try { const msg = await channel.send(header + chunks[i]); lastListMessages.push(msg); } catch(err){ console.error(err); }
+            try { const msg = await channel.send(header + chunks[i]); lastListMessages[channelId].push(msg); } catch(err){ console.error(err); }
         }
     }
 
@@ -656,7 +661,7 @@ client.once("ready", async () => {
                 .sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
 
             if (listMessages.size>0) {
-                lastListMessages = Array.from(listMessages.values());
+                lastListMessages[channelId] = Array.from(listMessages.values());
                 await updateBridgeListMessage(channel);
             } else {
                 await updateBridgeListMessage(channel);
