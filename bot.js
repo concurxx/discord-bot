@@ -110,6 +110,12 @@ function loadServerData(guildId) {
         }
     } 
     catch (err) { console.error(`❌ Error reading user data file for server ${guildId}:`, err); }
+    
+    // Try to restore from Google Drive if no local data exists
+    if (Object.keys(userData).length === 0 && bridgeList.length === 0) {
+        console.log(`🔄 [Server ${guildId}] No local data found, attempting Google Drive restore...`);
+        restoreFromGoogleDrive(guildId);
+    }
 }
 
 // Load legacy single-server data
@@ -147,6 +153,12 @@ function loadLegacyData() {
         }
     } 
     catch (err) { console.error("❌ Error reading legacy user data file:", err); }
+    
+    // Try to restore from Google Drive if no local data exists
+    if (Object.keys(userData).length === 0 && bridgeList.length === 0) {
+        console.log(`🔄 No legacy data found, attempting Google Drive restore...`);
+        restoreFromGoogleDrive('legacy');
+    }
 }
 
 let lastListMessages = [];
@@ -327,7 +339,7 @@ async function backupToGoogleDrive(guildId) {
     }
 }
 
-async function restoreFromGoogleDrive() {
+async function restoreFromGoogleDrive(guildId = 'legacy') {
     if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return false;
     
     try {
@@ -351,37 +363,80 @@ async function restoreFromGoogleDrive() {
                 return false;
             }
             
-            // Check if this is the new combined format or old user-only format
-            if (cloudData.userData && cloudData.bridgeList) {
-                // New combined format
-                console.log("📦 Detected combined backup format");
-                console.log(`📊 Cloud data: ${Object.keys(cloudData.userData).length} users, ${cloudData.bridgeList.length} bridges`);
+            // Check if this is the new multi-server format
+            if (cloudData.servers) {
+                console.log("📦 Detected multi-server backup format");
+                console.log(`📊 Available servers: ${Object.keys(cloudData.servers).length}`);
                 
-                // Restore user data
-                if (cloudData.userData) {
-                    for (const userId in cloudData.userData) {
-                        if (!userData[userId] || 
-                            (cloudData.userData[userId].lastUpdated && 
-                             (!userData[userId].lastUpdated || cloudData.userData[userId].lastUpdated > userData[userId].lastUpdated))) {
-                            userData[userId] = cloudData.userData[userId];
+                if (cloudData.servers[guildId]) {
+                    const serverData = cloudData.servers[guildId];
+                    console.log(`📊 Server ${guildId} data: ${Object.keys(serverData.userData || {}).length} users, ${(serverData.bridgeList || []).length} bridges`);
+                    
+                    // Restore user data
+                    if (serverData.userData) {
+                        for (const userId in serverData.userData) {
+                            if (!userData[userId] || 
+                                (serverData.userData[userId].lastUpdated && 
+                                 (!userData[userId].lastUpdated || serverData.userData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                                userData[userId] = serverData.userData[userId];
+                            }
+                        }
+                        console.log(`✅ [Server ${guildId}] User data restored from multi-server backup`);
+                    }
+                    
+                    // Restore bridge data
+                    if (serverData.bridgeList && Array.isArray(serverData.bridgeList)) {
+                        console.log(`🔍 [Server ${guildId}] Local bridge count: ${bridgeList.length}, Cloud bridge count: ${serverData.bridgeList.length}`);
+                        // Only restore if local bridge list is empty or cloud data is newer
+                        if (bridgeList.length === 0 || 
+                            (serverData.lastBackup && serverData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
+                            bridgeList = serverData.bridgeList;
+                            console.log(`✅ [Server ${guildId}] Bridge list restored from multi-server backup (${bridgeList.length} bridges)`);
+                            // Save the restored bridge data locally
+                            saveBridgeList(guildId);
+                        } else {
+                            console.log(`ℹ️ [Server ${guildId}] Local bridge data is newer, keeping local version`);
                         }
                     }
-                    console.log("✅ User data restored from combined backup");
+                } else {
+                    console.log(`ℹ️ No data found for server ${guildId} in multi-server backup`);
                 }
                 
-                // Restore bridge data
-                if (cloudData.bridgeList && Array.isArray(cloudData.bridgeList)) {
-                    console.log(`🔍 Local bridge count: ${bridgeList.length}, Cloud bridge count: ${cloudData.bridgeList.length}`);
-                    // Only restore if local bridge list is empty or cloud data is newer
-                    if (bridgeList.length === 0 || 
-                        (cloudData.lastBackup && cloudData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
-                        bridgeList = cloudData.bridgeList;
-                        console.log(`✅ Bridge list restored from combined backup (${bridgeList.length} bridges)`);
-                        // Save the restored bridge data locally (this will create local backup files)
-                        saveBridgeList(guildId);
-                    } else {
-                        console.log("ℹ️ Local bridge data is newer, keeping local version");
+            } else if (cloudData.userData && cloudData.bridgeList) {
+                // Legacy combined format (single server)
+                console.log("📦 Detected legacy combined backup format");
+                console.log(`📊 Cloud data: ${Object.keys(cloudData.userData).length} users, ${cloudData.bridgeList.length} bridges`);
+                
+                // Only restore if we're in legacy mode or this is the first server
+                if (!SUPPORT_MULTI_SERVER || guildId === 'legacy') {
+                    // Restore user data
+                    if (cloudData.userData) {
+                        for (const userId in cloudData.userData) {
+                            if (!userData[userId] || 
+                                (cloudData.userData[userId].lastUpdated && 
+                                 (!userData[userId].lastUpdated || cloudData.userData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                                userData[userId] = cloudData.userData[userId];
+                            }
+                        }
+                        console.log("✅ User data restored from legacy combined backup");
                     }
+                    
+                    // Restore bridge data
+                    if (cloudData.bridgeList && Array.isArray(cloudData.bridgeList)) {
+                        console.log(`🔍 Local bridge count: ${bridgeList.length}, Cloud bridge count: ${cloudData.bridgeList.length}`);
+                        // Only restore if local bridge list is empty or cloud data is newer
+                        if (bridgeList.length === 0 || 
+                            (cloudData.lastBackup && cloudData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
+                            bridgeList = cloudData.bridgeList;
+                            console.log(`✅ Bridge list restored from legacy combined backup (${bridgeList.length} bridges)`);
+                            // Save the restored bridge data locally
+                            saveBridgeList(guildId);
+                        } else {
+                            console.log("ℹ️ Local bridge data is newer, keeping local version");
+                        }
+                    }
+                } else {
+                    console.log(`ℹ️ Skipping legacy data restore for server ${guildId} in multi-server mode`);
                 }
                 
             } else {
@@ -389,15 +444,20 @@ async function restoreFromGoogleDrive() {
                 console.log("📦 Detected legacy user-only backup format");
                 console.log(`📊 Legacy data: ${Object.keys(cloudData).length} users`);
                 
-                // Merge cloud data with local data, preferring newer timestamps
-                for (const userId in cloudData) {
-                    if (!userData[userId] || 
-                        (cloudData[userId].lastUpdated && 
-                         (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
-                        userData[userId] = cloudData[userId];
+                // Only restore if we're in legacy mode
+                if (!SUPPORT_MULTI_SERVER || guildId === 'legacy') {
+                    // Merge cloud data with local data, preferring newer timestamps
+                    for (const userId in cloudData) {
+                        if (!userData[userId] || 
+                            (cloudData[userId].lastUpdated && 
+                             (!userData[userId].lastUpdated || cloudData[userId].lastUpdated > userData[userId].lastUpdated))) {
+                            userData[userId] = cloudData[userId];
+                        }
                     }
+                    console.log("✅ User data restored from legacy user-only backup");
+                } else {
+                    console.log(`ℹ️ Skipping legacy user-only data restore for server ${guildId} in multi-server mode`);
                 }
-                console.log("✅ User data restored from legacy backup");
             }
             
             return true;
@@ -412,7 +472,7 @@ async function restoreFromGoogleDrive() {
 }
 
 // ----------------- USER DATA FUNCTIONS -----------------
-function updateUserData(userId, username, type, value) {
+function updateUserData(userId, username, type, value, guildId) {
     if (!userData[userId]) {
         userData[userId] = {
             username: username,
@@ -576,8 +636,7 @@ client.once("ready", async () => {
     // Initialize Google Drive
     await initializeGoogleDrive();
     
-    // Try to restore data from Google Drive (both user data and bridge data)
-    await restoreFromGoogleDrive();
+    // Note: Google Drive restore will happen when first message is processed per server
     
     try {
         const channel = await client.channels.fetch(ALLOWED_CHANNEL_ID);
@@ -632,7 +691,7 @@ client.on("messageCreate", async (message) => {
         const parts = content.split(' ');
         if (parts.length === 2 && /^\d+$/.test(parts[1])) {
             const troopCount = parseInt(parts[1], 10);
-            updateUserData(userId, message.author.username, 'troops', troopCount);
+            updateUserData(userId, message.author.username, 'troops', troopCount, guildId);
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
@@ -661,7 +720,7 @@ client.on("messageCreate", async (message) => {
         const silverText = content.substring(8).trim(); // Get everything after "!silver "
         
         if (silverText.length > 0) {
-            updateUserData(userId, message.author.username, 'silver', silverText);
+            updateUserData(userId, message.author.username, 'silver', silverText, guildId);
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
