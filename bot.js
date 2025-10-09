@@ -1110,19 +1110,17 @@ client.on("messageCreate", async (message) => {
         console.log(`📢 War count request initiated by ${message.author.tag}`);
         
         try {
-            // Get the "Blatant Disregard" role (case-insensitive search)
-            const role = message.guild.roles.cache.find(role => 
-                role.name.toLowerCase() === "blatant disregard"
-            );
+            // Get the "Blatant Disregard" role by ID
+            const roleId = "1425515204942368890";
+            const role = message.guild.roles.cache.get(roleId);
             
             if (!role) {
-                // Debug: List all available roles
-                const allRoles = message.guild.roles.cache.map(r => r.name).join(", ");
-                console.log(`🔍 Available roles in server: ${allRoles}`);
-                
                 await safeReply(message, 
-                    `❌ Role 'Blatant Disregard' not found!\n\n` +
-                    `Available roles: ${allRoles.slice(0, 1000)}${allRoles.length > 1000 ? "..." : ""}`, 
+                    `❌ Role with ID '${roleId}' not found!\n\n` +
+                    `This could mean:\n` +
+                    `• The role was deleted\n` +
+                    `• The bot doesn't have permission to see the role\n` +
+                    `• The role ID is incorrect`, 
                     10000
                 );
                 return;
