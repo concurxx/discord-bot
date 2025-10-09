@@ -593,6 +593,29 @@ function splitMessage(entries, maxLength = 1900) {
     return chunks;
 }
 
+// Helper function to safely reply to messages with fallback
+async function safeReply(message, content, deleteAfter = 5000) {
+    try {
+        const reply = await message.reply(content);
+        if (deleteAfter > 0) {
+            setTimeout(async() => {try{await reply.delete()}catch{}}, deleteAfter);
+        }
+        return reply;
+    } catch(err) {
+        // Fallback to regular message if reply fails
+        try { 
+            const msg = await message.channel.send(content);
+            if (deleteAfter > 0) {
+                setTimeout(async() => {try{await msg.delete()}catch{}}, deleteAfter);
+            }
+            return msg;
+        } catch(fallbackErr) {
+            console.error("Failed to send message:", fallbackErr);
+            return null;
+        }
+    }
+}
+
 // ----------------- CLEAN & UPDATE -----------------
 async function cleanChannel(channel) {
     try {
@@ -773,18 +796,12 @@ client.on("messageCreate", async (message) => {
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
             saveCommandLog(guildId);
             
-            try {
-                const reply = await message.reply(`✅ Updated your troop count to **${troopCount.toLocaleString()}**`);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, `✅ Updated your troop count to **${troopCount.toLocaleString()}**`, 5000);
             
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         } else {
-            try {
-                const reply = await message.reply(`❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\`)`);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, `❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\`)`, 8000);
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         }
@@ -802,18 +819,12 @@ client.on("messageCreate", async (message) => {
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
             saveCommandLog(guildId);
             
-            try {
-                const reply = await message.reply(`✅ Updated your silver info to: **${silverText}**`);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, `✅ Updated your silver info to: **${silverText}**`, 5000);
             
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         } else {
-            try {
-                const reply = await message.reply(`❌ Please provide silver information. Use: \`!silver <your silver info>\` (e.g., \`!silver 1 castle 2 forts 3 cities\`)`);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, `❌ Please provide silver information. Use: \`!silver <your silver info>\` (e.g., \`!silver 1 castle 2 forts 3 cities\`)`, 8000);
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         }
@@ -824,20 +835,13 @@ client.on("messageCreate", async (message) => {
         const stats = formatUserStats(userId);
         
         if (!stats) {
-            try {
-                const reply = await message.reply("⚠️ You haven't set any stats yet. Use `!troops <number>` or `!silver <number> city` to get started!");
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 8000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, "⚠️ You haven't set any stats yet. Use `!troops <number>` or `!silver <number> city` to get started!", 8000);
         } else {
             try {
                 await message.author.send(`**Your Stats:**\n\n${stats}`);
-                const reply = await message.reply("✅ Your stats have been sent via DM!");
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+                await safeReply(message, "✅ Your stats have been sent via DM!", 5000);
             } catch {
-                try {
-                    const reply = await message.reply(`**Your Stats:**\n\n${stats}`);
-                    setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
-                } catch(err) { console.error(err); }
+                await safeReply(message, `**Your Stats:**\n\n${stats}`, 10000);
             }
         }
         
@@ -859,14 +863,12 @@ client.on("messageCreate", async (message) => {
                 const header = i === 0 ? "**All User Stats:**\n\n" : `**All User Stats (Part ${i+1}):**\n\n`;
                 await message.author.send(header + chunks[i]);
             }
-            const reply = await message.reply("✅ All stats have been sent via DM!");
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            await safeReply(message, "✅ All stats have been sent via DM!", 5000);
         } catch {
             try {
                 for (let i = 0; i < chunks.length; i++) {
                     const header = i === 0 ? "**All User Stats:**\n\n" : `**All User Stats (Part ${i+1}):**\n\n`;
-                    const reply = await message.channel.send(header + chunks[i]);
-                    setTimeout(async() => {try{await reply.delete()}catch{}}, 15000);
+                    await safeReply(message, header + chunks[i], 15000);
                 }
             } catch(err) { console.error(err); }
         }
@@ -904,13 +906,9 @@ client.on("messageCreate", async (message) => {
         
         try {
             await message.author.send(helpText);
-            const reply = await message.reply("✅ Help sent via DM!");
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            await safeReply(message, "✅ Help sent via DM!", 5000);
         } catch {
-            try {
-                const reply = await message.channel.send(helpText);
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 20000);
-            } catch(err) { console.error(err); }
+            await safeReply(message, helpText, 20000);
         }
         
         setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
@@ -1116,8 +1114,7 @@ client.on("messageCreate", async (message) => {
             const role = message.guild.roles.cache.find(role => role.name === "Blatant Disregard");
             
             if (!role) {
-                const reply = await message.reply("❌ Role 'Blatant Disregard' not found!");
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+                await safeReply(message, "❌ Role 'Blatant Disregard' not found!", 5000);
                 return;
             }
             
@@ -1125,8 +1122,7 @@ client.on("messageCreate", async (message) => {
             const members = role.members.map(member => member.user);
             
             if (members.length === 0) {
-                const reply = await message.reply("❌ No members found with the 'Blatant Disregard' role!");
-                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+                await safeReply(message, "❌ No members found with the 'Blatant Disregard' role!", 5000);
                 return;
             }
             
@@ -1144,6 +1140,8 @@ client.on("messageCreate", async (message) => {
             // Send DM to each member
             let successCount = 0;
             let failCount = 0;
+            let dmDisabledCount = 0;
+            let otherErrorCount = 0;
             
             for (const member of members) {
                 try {
@@ -1152,24 +1150,40 @@ client.on("messageCreate", async (message) => {
                     console.log(`✅ Sent war count request to ${member.tag}`);
                 } catch (err) {
                     failCount++;
-                    console.log(`❌ Failed to send DM to ${member.tag}: ${err.message}`);
+                    if (err.code === 50007) {
+                        dmDisabledCount++;
+                        console.log(`❌ Cannot send DM to ${member.tag}: User has DMs disabled`);
+                    } else if (err.code === 50001) {
+                        console.log(`❌ Cannot send DM to ${member.tag}: Missing access to user`);
+                    } else {
+                        otherErrorCount++;
+                        console.log(`❌ Failed to send DM to ${member.tag}: ${err.message} (Code: ${err.code})`);
+                    }
                 }
+                
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
             
             // Send confirmation message
-            const reply = await message.reply(
-                `📢 **War Count Request Sent!**\n\n` +
+            let statusMessage = `📢 **War Count Request Sent!**\n\n` +
                 `✅ Successfully sent to: **${successCount}** members\n` +
-                `❌ Failed to send to: **${failCount}** members\n\n` +
-                `Total members with "Blatant Disregard" role: **${members.length}**`
-            );
+                `❌ Failed to send to: **${failCount}** members\n\n`;
             
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
+            if (dmDisabledCount > 0) {
+                statusMessage += `🔒 DMs disabled: **${dmDisabledCount}** members\n`;
+            }
+            if (otherErrorCount > 0) {
+                statusMessage += `⚠️ Other errors: **${otherErrorCount}** members\n`;
+            }
+            
+            statusMessage += `\nTotal members with "Blatant Disregard" role: **${members.length}**`;
+            
+            await safeReply(message, statusMessage, 15000);
             
         } catch (err) {
             console.error("❌ Error sending war count request:", err);
-            const reply = await message.reply("❌ Error sending war count request. Please try again.");
-            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+            await safeReply(message, "❌ Error sending war count request. Please try again.", 5000);
         }
         
         commandLog[userId].push({command: "!requestwarcount", timestamp: now});
