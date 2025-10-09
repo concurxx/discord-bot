@@ -69,6 +69,7 @@ function getServerDataFiles(guildId) {
 let bridgeList = [];
 let commandLog = {};
 let userData = {};
+let isSaving = false; // Flag to prevent restore during save operations
 
 // Load server-specific data
 function loadServerData(guildId) {
@@ -118,6 +119,8 @@ function loadServerData(guildId) {
     if (Object.keys(userData).length === 0 && bridgeList.length === 0) {
         console.log(`🔄 [Server ${guildId}] No local data found, attempting Google Drive restore...`);
         restoreFromGoogleDrive(guildId);
+    } else {
+        console.log(`ℹ️ [Server ${guildId}] Local data exists, skipping Google Drive restore`);
     }
 }
 
@@ -182,6 +185,7 @@ function saveCommandLog(guildId) {
 
 function saveUserData(guildId) {
     try { 
+        isSaving = true;
         if (!SUPPORT_MULTI_SERVER) {
             fs.writeFileSync(LEGACY_USER_DATA_FILE, JSON.stringify(userData, null, 2), "utf8");
             backupToGoogleDrive('legacy');
@@ -190,12 +194,17 @@ function saveUserData(guildId) {
             fs.writeFileSync(files.userData, JSON.stringify(userData, null, 2), "utf8");
             backupToGoogleDrive(guildId);
         }
+        isSaving = false;
     }
-    catch (err) { console.error(`❌ Error saving user data file:`, err); }
+    catch (err) { 
+        isSaving = false;
+        console.error(`❌ Error saving user data file:`, err); 
+    }
 }
 
 function saveBridgeList(guildId) {
     try {
+        isSaving = true;
         if (!SUPPORT_MULTI_SERVER) {
             // Legacy mode
             fs.writeFileSync(LEGACY_DATA_FILE, JSON.stringify(bridgeList, null, 2), "utf8");
@@ -242,7 +251,11 @@ function saveBridgeList(guildId) {
             
             backupToGoogleDrive(guildId);
         }
-    } catch (err) { console.log(`Error saving bridge list:`, err); }
+        isSaving = false;
+    } catch (err) { 
+        isSaving = false;
+        console.log(`Error saving bridge list:`, err); 
+    }
 }
 
 // ----------------- GOOGLE DRIVE FUNCTIONS -----------------
@@ -343,7 +356,7 @@ async function backupToGoogleDrive(guildId) {
 }
 
 async function restoreFromGoogleDrive(guildId = 'legacy') {
-    if (!driveAuth || !GOOGLE_DRIVE_FILE_ID) return false;
+    if (!driveAuth || !GOOGLE_DRIVE_FILE_ID || isSaving) return false;
     
     try {
         const sheets = google.sheets({ version: 'v4', auth: driveAuth });
@@ -390,15 +403,15 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
                     // Restore bridge data
                     if (serverData.bridgeList && Array.isArray(serverData.bridgeList)) {
                         console.log(`🔍 [Server ${guildId}] Local bridge count: ${bridgeList.length}, Cloud bridge count: ${serverData.bridgeList.length}`);
-                        // Only restore if local bridge list is empty or cloud data is newer
-                        if (bridgeList.length === 0 || 
-                            (serverData.lastBackup && serverData.lastBackup > (bridgeList[0]?.lastUpdated || 0))) {
+                        // Only restore if local bridge list is empty AND cloud has data, or cloud data is significantly newer
+                        if ((bridgeList.length === 0 && serverData.bridgeList.length > 0) || 
+                            (serverData.lastBackup && serverData.lastBackup > (Date.now() - 60000) && serverData.bridgeList.length > bridgeList.length)) {
                             bridgeList = serverData.bridgeList;
                             console.log(`✅ [Server ${guildId}] Bridge list restored from multi-server backup (${bridgeList.length} bridges)`);
                             // Save the restored bridge data locally
                             saveBridgeList(guildId);
                         } else {
-                            console.log(`ℹ️ [Server ${guildId}] Local bridge data is newer, keeping local version`);
+                            console.log(`ℹ️ [Server ${guildId}] Local bridge data is newer or cloud is empty, keeping local version`);
                         }
                     }
                 } else {
