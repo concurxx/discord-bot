@@ -894,6 +894,7 @@ client.on("messageCreate", async (message) => {
             `• \`!listme\` - Get bridge list via DM\n` +
             `• \`!backups\`, \`!restore <number>\` - Manage local backups\n` +
             `• \`!backup\` - Backup to Google Drive\n` +
+            `• \`!requestwarcount\` - Request war count updates from role members\n` +
             `• \`!mode\` - Show current bot mode\n` +
             `• \`!viewlog\` - View command history\n` +
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
@@ -1102,6 +1103,79 @@ client.on("messageCreate", async (message) => {
             const reply = await message.reply(`🤖 **Bot Mode:** ${mode}${serverInfo}\n\n**Data Storage:** ${SUPPORT_MULTI_SERVER ? 'Server-specific folders' : 'Single shared folder'}\n**Google Drive:** ${SUPPORT_MULTI_SERVER ? 'Multi-server backup' : 'Single backup'}`);
             setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
         } catch(err) { console.error(err); }
+        setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+        return;
+    }
+
+    // -------- REQUEST WAR COUNT --------
+    if(content.toLowerCase() === "!requestwarcount"){
+        console.log(`📢 War count request initiated by ${message.author.tag}`);
+        
+        try {
+            // Get the "Blatant Disregard" role
+            const role = message.guild.roles.cache.find(role => role.name === "Blatant Disregard");
+            
+            if (!role) {
+                const reply = await message.reply("❌ Role 'Blatant Disregard' not found!");
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+                return;
+            }
+            
+            // Get all members with the role
+            const members = role.members.map(member => member.user);
+            
+            if (members.length === 0) {
+                const reply = await message.reply("❌ No members found with the 'Blatant Disregard' role!");
+                setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+                return;
+            }
+            
+            // Create the message to send
+            const requestMessage = `📢 **War Count Update Request**\n\n` +
+                `Please update your current troop and silver count:\n\n` +
+                `**Commands to use:**\n` +
+                `• \`!troops <number>\` - Set your troop count\n` +
+                `• \`!silver <your silver info>\` - Set your silver information\n\n` +
+                `**Examples:**\n` +
+                `• \`!troops 50000\` - Sets your troops to 50,000\n` +
+                `• \`!silver 2 castles 3 cities\` - Sets your silver info\n\n` +
+                `Thanks for keeping your stats updated! 🏰`;
+            
+            // Send DM to each member
+            let successCount = 0;
+            let failCount = 0;
+            
+            for (const member of members) {
+                try {
+                    await member.send(requestMessage);
+                    successCount++;
+                    console.log(`✅ Sent war count request to ${member.tag}`);
+                } catch (err) {
+                    failCount++;
+                    console.log(`❌ Failed to send DM to ${member.tag}: ${err.message}`);
+                }
+            }
+            
+            // Send confirmation message
+            const reply = await message.reply(
+                `📢 **War Count Request Sent!**\n\n` +
+                `✅ Successfully sent to: **${successCount}** members\n` +
+                `❌ Failed to send to: **${failCount}** members\n\n` +
+                `Total members with "Blatant Disregard" role: **${members.length}**`
+            );
+            
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 10000);
+            
+        } catch (err) {
+            console.error("❌ Error sending war count request:", err);
+            const reply = await message.reply("❌ Error sending war count request. Please try again.");
+            setTimeout(async() => {try{await reply.delete()}catch{}}, 5000);
+        }
+        
+        commandLog[userId].push({command: "!requestwarcount", timestamp: now});
+        commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+        saveCommandLog(guildId);
+        
         setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
         return;
     }
