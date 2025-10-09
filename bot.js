@@ -118,9 +118,36 @@ function loadServerData(guildId) {
     // Try to restore from Google Drive if no local data exists
     if (Object.keys(userData).length === 0 && bridgeList.length === 0) {
         console.log(`🔄 [Server ${guildId}] No local data found, attempting Google Drive restore...`);
-        restoreFromGoogleDrive(guildId);
+        const restored = await restoreFromGoogleDrive(guildId);
+        if (restored) {
+            console.log(`🔄 [Server ${guildId}] Data restored, will update bridge list on next message`);
+        }
     } else {
         console.log(`ℹ️ [Server ${guildId}] Local data exists, skipping Google Drive restore`);
+    }
+}
+
+// Update bridge list messages for all channels of a server
+async function updateAllChannelBridgeLists(guildId) {
+    if (!SUPPORT_MULTI_SERVER) return;
+    
+    try {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) return;
+        
+        for (const channelId of ALLOWED_CHANNEL_IDS) {
+            try {
+                const channel = await guild.channels.fetch(channelId);
+                if (channel) {
+                    await updateBridgeListMessage(channel);
+                    console.log(`✅ Updated bridge list for channel ${channelId} in server ${guildId}`);
+                }
+            } catch (err) {
+                console.error(`❌ Error updating channel ${channelId} in server ${guildId}:`, err);
+            }
+        }
+    } catch (err) {
+        console.error(`❌ Error updating bridge lists for server ${guildId}:`, err);
     }
 }
 
@@ -410,6 +437,8 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
                             console.log(`✅ [Server ${guildId}] Bridge list restored from multi-server backup (${bridgeList.length} bridges)`);
                             // Save the restored bridge data locally
                             saveBridgeList(guildId);
+                            // Update bridge list messages in all channels
+                            setTimeout(() => updateAllChannelBridgeLists(guildId), 1000);
                         } else {
                             console.log(`ℹ️ [Server ${guildId}] Local bridge data is newer or cloud is empty, keeping local version`);
                         }
@@ -680,6 +709,15 @@ client.once("ready", async () => {
                 await updateBridgeListMessage(channel);
             }
             console.log(`✅ Initialized bridge list for channel ${channelId}`);
+            
+            // If this is a multi-server setup, load server data and update bridge list
+            if (SUPPORT_MULTI_SERVER) {
+                const guildId = channel.guild?.id;
+                if (guildId) {
+                    loadServerData(guildId);
+                    await updateBridgeListMessage(channel);
+                }
+            }
         } catch (err) { 
             console.error(`❌ Error initializing channel ${channelId}:`, err); 
         }
