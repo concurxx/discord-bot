@@ -523,6 +523,19 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
 }
 
 // ----------------- SILVER PARSING FUNCTIONS -----------------
+function processSilverInput(silverText) {
+    if (!silverText || typeof silverText !== 'string') return silverText;
+    
+    // Convert k notation to full numbers (8k -> 8000, 10k -> 10000, etc.)
+    const processedText = silverText.replace(/(\d+(?:\.\d+)?)k\b/gi, (match, number) => {
+        const num = parseFloat(number);
+        return (num * 1000).toString();
+    });
+    
+    return processedText;
+}
+
+// ----------------- SILVER PARSING FUNCTIONS -----------------
 function parseSilverCounts(silverText) {
     if (!silverText || typeof silverText !== 'string') return null;
     
@@ -910,18 +923,26 @@ client.on("messageCreate", async (message) => {
         const silverText = content.substring(8).trim(); // Get everything after "!silver "
         
         if (silverText.length > 0) {
-            updateUserData(userId, message.author.username, 'silver', silverText, guildId);
+            // Process the input to convert k notation to full numbers
+            const processedSilverText = processSilverInput(silverText);
+            
+            updateUserData(userId, message.author.username, 'silver', processedSilverText, guildId);
             
             commandLog[userId].push({command: content, timestamp: now});
             commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
             saveCommandLog(guildId);
             
-            await safeReply(message, `✅ Updated your silver info to: **${silverText}**`, 5000);
+            // Show the processed version in the confirmation message
+            const displayText = processedSilverText !== silverText ? 
+                `**${processedSilverText}** (converted from: ${silverText})` : 
+                `**${processedSilverText}**`;
+            
+            await safeReply(message, `✅ Updated your silver info to: ${displayText}`, 5000);
             
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         } else {
-            await safeReply(message, `❌ Please provide silver information. Use: \`!silver <your silver info>\` (e.g., \`!silver 1 castle 2 forts 3 cities\`)`, 8000);
+            await safeReply(message, `❌ Please provide silver information. Use: \`!silver <your silver info>\` (e.g., \`!silver 8k\` or \`!silver 1 castle 2 forts 3 cities\`)`, 8000);
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         }
@@ -983,7 +1004,7 @@ client.on("messageCreate", async (message) => {
         const helpText = `**Available Commands:**\n\n` +
             `**User Data Commands:**\n` +
             `• \`!troops <number>\` - Set your troop count\n` +
-            `• \`!silver <your silver info>\` - Set your silver information\n` +
+            `• \`!silver <your silver info>\` - Set your silver information (supports k notation: 8k = 8000)\n` +
             `• \`!mystats\` - View your current stats\n` +
             `• \`!allstats\` - View all users' stats\n\n` +
             `**Bridge List Commands:** *(Allowed channel only)*\n` +
@@ -999,7 +1020,8 @@ client.on("messageCreate", async (message) => {
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
             `**Examples:**\n` +
             `• \`!troops 40000\` - Sets your troops to 40,000\n` +
-            `• \`!silver 1 castle 2 forts 3 cities\` - Sets your silver info`;
+            `• \`!silver 1 castle 2 forts 3 cities\` - Sets your silver info\n` +
+            `• \`!silver 50k\` - Sets your silver to 50000 (k notation support)`;
         
         try {
             await message.author.send(helpText);
@@ -1238,10 +1260,11 @@ client.on("messageCreate", async (message) => {
                 `Please update your current troop and silver count:\n\n` +
                 `**Commands to use:**\n` +
                 `• \`!troops <number>\` - Set your troop count\n` +
-                `• \`!silver <your silver info>\` - Set your silver information\n\n` +
+                `• \`!silver <your silver info>\` - Set your silver information (supports k notation)\n\n` +
                 `**Examples:**\n` +
                 `• \`!troops 50000\` - Sets your troops to 50,000\n` +
-                `• \`!silver 2 castles 3 cities\` - Sets your silver info\n\n` +
+                `• \`!silver 2 castles 3 cities\` - Sets your silver info\n` +
+                `• \`!silver 25k\` - Sets your silver to 25000\n\n` +
                 `Thanks for keeping your stats updated! 🏰`;
             
             // Send DM to each member
