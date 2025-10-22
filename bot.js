@@ -535,6 +535,27 @@ function processSilverInput(silverText) {
     return processedText;
 }
 
+function processTroopInput(troopText) {
+    if (!troopText || typeof troopText !== 'string') return null;
+    
+    const trimmed = troopText.trim();
+    
+    // Check if it's k notation (e.g., "8k", "10k", "2.5k")
+    const kMatch = trimmed.match(/^(\d+(?:\.\d+)?)k$/i);
+    if (kMatch) {
+        const num = parseFloat(kMatch[1]);
+        return Math.floor(num * 1000); // Convert to integer
+    }
+    
+    // Check if it's a regular number
+    const numberMatch = trimmed.match(/^\d+$/);
+    if (numberMatch) {
+        return parseInt(trimmed, 10);
+    }
+    
+    return null; // Invalid format
+}
+
 // ----------------- SILVER PARSING FUNCTIONS -----------------
 function parseSilverCounts(silverText) {
     if (!silverText || typeof silverText !== 'string') return null;
@@ -898,20 +919,34 @@ client.on("messageCreate", async (message) => {
     if (content.toLowerCase().startsWith('!troops ')) {
         console.log(`✅ Troops command matched!`);
         const parts = content.split(' ');
-        if (parts.length === 2 && /^\d+$/.test(parts[1])) {
-            const troopCount = parseInt(parts[1], 10);
-            updateUserData(userId, message.author.username, 'troops', troopCount, guildId);
+        if (parts.length === 2) {
+            const troopCount = processTroopInput(parts[1]);
             
-            commandLog[userId].push({command: content, timestamp: now});
-            commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
-            saveCommandLog(guildId);
-            
-            await safeReply(message, `✅ Updated your troop count to **${troopCount.toLocaleString()}**`, 5000);
-            
-            setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
-            return;
+            if (troopCount !== null && troopCount >= 0) {
+                updateUserData(userId, message.author.username, 'troops', troopCount, guildId);
+                
+                commandLog[userId].push({command: content, timestamp: now});
+                commandLog[userId] = commandLog[userId].filter(e => e.timestamp > now - 24 * 60 * 60 * 1000);
+                saveCommandLog(guildId);
+                
+                // Show conversion info if k notation was used
+                const originalInput = parts[1];
+                const wasConverted = originalInput.toLowerCase().includes('k');
+                const displayText = wasConverted ? 
+                    `**${troopCount.toLocaleString()}** (converted from: ${originalInput})` : 
+                    `**${troopCount.toLocaleString()}**`;
+                
+                await safeReply(message, `✅ Updated your troop count to ${displayText}`, 5000);
+                
+                setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+                return;
+            } else {
+                await safeReply(message, `❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\` or \`!troops 40k\`)`, 8000);
+                setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
+                return;
+            }
         } else {
-            await safeReply(message, `❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\`)`, 8000);
+            await safeReply(message, `❌ Invalid format. Use: \`!troops <number>\` (e.g., \`!troops 40000\` or \`!troops 40k\`)`, 8000);
             setTimeout(async() => {try{await message.delete()}catch{}}, 3000);
             return;
         }
@@ -953,7 +988,7 @@ client.on("messageCreate", async (message) => {
         const stats = formatUserStats(userId);
         
         if (!stats) {
-            await safeReply(message, "⚠️ You haven't set any stats yet. Use `!troops <number>` or `!silver <number> city` to get started!", 8000);
+            await safeReply(message, "⚠️ You haven't set any stats yet. Use `!troops <number>` or `!silver <info>` to get started! (k notation supported: 40k = 40000)", 8000);
         } else {
             try {
                 await message.author.send(`**Your Stats:**\n\n${stats}`);
@@ -1003,7 +1038,7 @@ client.on("messageCreate", async (message) => {
     if(content.toLowerCase() === "!help" || content.toLowerCase() === "!commands"){
         const helpText = `**Available Commands:**\n\n` +
             `**User Data Commands:**\n` +
-            `• \`!troops <number>\` - Set your troop count\n` +
+            `• \`!troops <number>\` - Set your troop count (supports k notation: 40k = 40000)\n` +
             `• \`!silver <your silver info>\` - Set your silver information (supports k notation: 8k = 8000)\n` +
             `• \`!mystats\` - View your current stats\n` +
             `• \`!allstats\` - View all users' stats\n\n` +
@@ -1020,6 +1055,7 @@ client.on("messageCreate", async (message) => {
             `• \`!cleanup\` - Clean duplicate messages\n\n` +
             `**Examples:**\n` +
             `• \`!troops 40000\` - Sets your troops to 40,000\n` +
+            `• \`!troops 40k\` - Sets your troops to 40,000 (k notation)\n` +
             `• \`!silver 1 castle 2 forts 3 cities\` - Sets your silver info\n` +
             `• \`!silver 50k\` - Sets your silver to 50000 (k notation support)`;
         
@@ -1259,7 +1295,7 @@ client.on("messageCreate", async (message) => {
             const requestMessage = `📢 **War Count Update Request**\n\n` +
                 `Please update your current troop and silver count:\n\n` +
                 `**Commands to use:**\n` +
-                `• \`!troops <number>\` - Set your troop count\n` +
+                `• \`!troops <number>\` - Set your troop count (supports k notation)\n` +
                 `• \`!silver <your silver info>\` - Set your silver information (supports k notation)\n\n` +
                 `**Examples:**\n` +
                 `• \`!troops 50000\` - Sets your troops to 50,000\n` +
