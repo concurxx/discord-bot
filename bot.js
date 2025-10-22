@@ -522,6 +522,75 @@ async function restoreFromGoogleDrive(guildId = 'legacy') {
     return false;
 }
 
+// ----------------- SILVER PARSING FUNCTIONS -----------------
+function parseSilverCounts(silverText) {
+    if (!silverText || typeof silverText !== 'string') return null;
+    
+    const text = silverText.toLowerCase();
+    const counts = {
+        castles: 0,
+        forts: 0,
+        cities: 0,
+        metros: 0
+    };
+    
+    // Regex patterns to match numbers followed by structure types
+    const patterns = [
+        { key: 'castles', regex: /(\d+)\s*(?:castle|castles)/g },
+        { key: 'forts', regex: /(\d+)\s*(?:fort|forts|fortress|fortresses)/g },
+        { key: 'cities', regex: /(\d+)\s*(?:city|cities)/g },
+        { key: 'metros', regex: /(\d+)\s*(?:metro|metros|metropolis|metropolises)/g }
+    ];
+    
+    let hasValidData = false;
+    
+    for (const pattern of patterns) {
+        const matches = [...text.matchAll(pattern.regex)];
+        if (matches.length > 0) {
+            // Sum all matches for this structure type (in case someone writes "2 castles 1 castle")
+            counts[pattern.key] = matches.reduce((sum, match) => sum + parseInt(match[1], 10), 0);
+            if (counts[pattern.key] > 0) hasValidData = true;
+        }
+    }
+    
+    return hasValidData ? counts : null;
+}
+
+function formatSilverTotals(allCounts) {
+    if (!allCounts || allCounts.length === 0) return "";
+    
+    const totals = {
+        castles: 0,
+        forts: 0,
+        cities: 0,
+        metros: 0
+    };
+    
+    let validEntries = 0;
+    
+    for (const counts of allCounts) {
+        if (counts) {
+            totals.castles += counts.castles;
+            totals.forts += counts.forts;
+            totals.cities += counts.cities;
+            totals.metros += counts.metros;
+            validEntries++;
+        }
+    }
+    
+    if (validEntries === 0) return "";
+    
+    const parts = [];
+    if (totals.castles > 0) parts.push(`${totals.castles} castle${totals.castles !== 1 ? 's' : ''}`);
+    if (totals.forts > 0) parts.push(`${totals.forts} fort${totals.forts !== 1 ? 's' : ''}`);
+    if (totals.cities > 0) parts.push(`${totals.cities} ${totals.cities === 1 ? 'city' : 'cities'}`);
+    if (totals.metros > 0) parts.push(`${totals.metros} metro${totals.metros !== 1 ? 's' : ''}`);
+    
+    if (parts.length === 0) return "";
+    
+    return `💰 **Total Silver:** ${parts.join(', ')} (from ${validEntries} user${validEntries !== 1 ? 's' : ''})`;
+}
+
 // ----------------- USER DATA FUNCTIONS -----------------
 function updateUserData(userId, username, type, value, guildId) {
     if (!userData[userId]) {
@@ -558,13 +627,41 @@ function formatAllStats() {
     
     if (users.length === 0) return "No user data available.";
     
-    return users.map(([userId, user]) => {
+    // Calculate total troops and collect silver data for parsing
+    let totalTroops = 0;
+    let troopCount = 0;
+    const silverCounts = [];
+    
+    const userStats = users.map(([userId, user]) => {
         const troops = user.troops !== null ? user.troops.toLocaleString() : "❌";
         const silver = user.silver !== null ? user.silver : "❌";
         const lastUpdated = user.lastUpdated ? `<t:${Math.floor(user.lastUpdated / 1000)}:R>` : "❓";
         
+        // Add to total if troops is a number
+        if (user.troops !== null && typeof user.troops === 'number') {
+            totalTroops += user.troops;
+            troopCount++;
+        }
+        
+        // Parse silver data for totals
+        if (user.silver !== null) {
+            const parsedSilver = parseSilverCounts(user.silver);
+            silverCounts.push(parsedSilver);
+        }
+        
         return `**${user.username}** | 🏰 ${troops} | 💰 ${silver} | ${lastUpdated}`;
-    }).join("\n");
+    });
+    
+    // Build totals summary
+    let totalSummary = `\n**📊 TOTALS:**\n🏰 **Total Troops:** ${totalTroops.toLocaleString()} (from ${troopCount} user${troopCount !== 1 ? 's' : ''})`;
+    
+    // Add silver totals if we can parse any
+    const silverTotals = formatSilverTotals(silverCounts);
+    if (silverTotals) {
+        totalSummary += `\n${silverTotals}`;
+    }
+    
+    return userStats.join("\n") + totalSummary;
 }
 
 // ----------------- FORMAT & SPLIT -----------------
