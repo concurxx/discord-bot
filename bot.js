@@ -1075,10 +1075,23 @@ client.on("messageCreate", async (message) => {
         const [cmd,numStr] = content.split(" ");
         const num = parseInt(numStr,10);
         if(num>0 && num<=bridgeList.length){
-            let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
-            bridgeList[num-1].color=color;
-            saveBridgeList(guildId);
-            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+            // Sort the list the same way it's displayed to find the correct bridge
+            const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
+            const sortedList = [...bridgeList].sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
+            
+            // Get the bridge at the displayed position
+            const targetBridge = sortedList[num-1];
+            
+            if (targetBridge) {
+                // Find this bridge in the original array and update its color
+                const bridgeIndex = bridgeList.indexOf(targetBridge);
+                if (bridgeIndex !== -1) {
+                    let color = cmd.toLowerCase()==="!red"?"🔴":cmd.toLowerCase()==="!yellow"?"🟡":"🟢";
+                    bridgeList[bridgeIndex].color = color;
+                    saveBridgeList(guildId);
+                    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+                }
+            }
         }
         commandLog[userId].push({command:content,timestamp:now});
         commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
@@ -1091,12 +1104,25 @@ client.on("messageCreate", async (message) => {
     if(content.startsWith("!remove")){
         const num = parseInt(content.split(" ")[1]);
         if(!isNaN(num) && num>=1 && num<=bridgeList.length){
-            bridgeList.splice(num-1,1);
-            saveBridgeList(guildId);
-            try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
-            commandLog[userId].push({command:content,timestamp:now});
-            commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
-            saveCommandLog(guildId);
+            // Sort the list the same way it's displayed to find the correct bridge
+            const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
+            const sortedList = [...bridgeList].sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
+            
+            // Get the bridge at the displayed position
+            const targetBridge = sortedList[num-1];
+            
+            if (targetBridge) {
+                // Find this bridge in the original array and remove it
+                const bridgeIndex = bridgeList.indexOf(targetBridge);
+                if (bridgeIndex !== -1) {
+                    bridgeList.splice(bridgeIndex, 1);
+                    saveBridgeList(guildId);
+                    try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+                    commandLog[userId].push({command:content,timestamp:now});
+                    commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
+                    saveCommandLog(guildId);
+                }
+            }
         }
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
