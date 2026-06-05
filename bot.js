@@ -4,12 +4,33 @@ const path = require("path");
 const { google } = require('googleapis');
 
 // ================= CONFIG =================
-const ALLOWED_CHANNEL_IDS = [
-    "1407022766967881759", // Original server channel
-    "1425905524553158826"  // New server channel
-];
+const BRIDGE_CHANNEL_BY_GUILD = {
+    "1489250872092524676": "1512463536788602940", // NEW SERVER
+};
+const LEGACY_BRIDGE_CHANNEL_ID = "1407022766967881759"; // Original server bridge channel
+const BRIDGE_LINK_REGEX = /l\+k:\/\/bridge\b[^\s]*/i;
+
+function getBridgeChannelIds() {
+    const ids = new Set([LEGACY_BRIDGE_CHANNEL_ID, ...Object.values(BRIDGE_CHANNEL_BY_GUILD)]);
+    if (process.env.ALLOWED_CHANNEL_ID) ids.add(process.env.ALLOWED_CHANNEL_ID);
+    return [...ids];
+}
+
+function isBridgeChannel(channel) {
+    if (!channel?.id) return false;
+    const guildId = channel.guild?.id;
+    if (guildId && BRIDGE_CHANNEL_BY_GUILD[guildId]) {
+        return channel.id === BRIDGE_CHANNEL_BY_GUILD[guildId];
+    }
+    return getBridgeChannelIds().includes(channel.id);
+}
+
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const BACKUP_LIMIT = 10; // how many backups to keep
+const WAR_COUNT_ROLE_BY_GUILD = {
+    "1489250872092524676": "1510726941530001518", // NEW SERVER
+};
+const LEGACY_WAR_COUNT_ROLE_ID = "1425515204942368890"; // Original server
 
 // Multi-server support
 const SUPPORT_MULTI_SERVER = process.env.SUPPORT_MULTI_SERVER !== 'false'; // Set to false to disable multi-server support
@@ -135,7 +156,7 @@ async function updateAllChannelBridgeLists(guildId) {
         const guild = client.guilds.cache.get(guildId);
         if (!guild) return;
         
-        for (const channelId of ALLOWED_CHANNEL_IDS) {
+        for (const channelId of getBridgeChannelIds()) {
             try {
                 const channel = await guild.channels.fetch(channelId);
                 if (channel) {
@@ -751,7 +772,7 @@ async function safeReply(message, content, deleteAfter = 5000) {
 async function cleanChannel(channel) {
     try {
         // Only clean the allowed channels where bridge list is maintained
-        if (!ALLOWED_CHANNEL_IDS.includes(channel.id)) return;
+        if (!isBridgeChannel(channel)) return;
         
         // Only clean if we have valid list messages to preserve
         const channelMessages = lastListMessages[channel.id] || [];
@@ -798,6 +819,11 @@ async function cleanChannel(channel) {
 }
 
 async function updateBridgeListMessage(channel) {
+    const guildId = channel.guild?.id;
+    if (SUPPORT_MULTI_SERVER && guildId) {
+        await loadServerData(guildId);
+    }
+
     const channelId = channel.id;
     const channelMessages = lastListMessages[channelId] || [];
     
@@ -832,7 +858,7 @@ async function updateBridgeListMessage(channel) {
     }
 
     // Clean channel more frequently when in an allowed channel
-    if (ALLOWED_CHANNEL_IDS.includes(channel.id)) {
+    if (isBridgeChannel(channel)) {
         if (Math.random() < 0.3) { // 30% chance to clean in allowed channel
             await cleanChannel(channel);
         }
@@ -842,6 +868,7 @@ async function updateBridgeListMessage(channel) {
 // ----------------- BOT READY -----------------
 client.once("ready", async () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+    console.log(`🌉 Bridge channels: ${getBridgeChannelIds().join(", ")}`);
     
     // Initialize Google Drive
     await initializeGoogleDrive();
@@ -849,7 +876,7 @@ client.once("ready", async () => {
     // Note: Google Drive restore will happen when first message is processed per server
     
     // Initialize bridge list messages for all allowed channels
-    for (const channelId of ALLOWED_CHANNEL_IDS) {
+    for (const channelId of getBridgeChannelIds()) {
         try {
             const channel = await client.channels.fetch(channelId);
             if (!channel) {
@@ -909,7 +936,7 @@ client.on("messageCreate", async (message) => {
     console.log(`📨 [Server ${guildId}] Processing message: "${content}" from ${message.author.username}`);
 
     // ----------------- COMMANDS -----------------
-    if (!ALLOWED_CHANNEL_IDS.includes(message.channel.id) && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
+    if (!isBridgeChannel(message.channel) && /^!(red|yellow|green|remove|clearlist|listclear|backups|restore|listme|viewlog|cleanup|backup)/i.test(content)) {
         try { await message.reply("⚠️ This command can only be used in the allowed channel."); } catch{}
         setTimeout(async()=>{try{await message.delete()}catch{}},3000);
         return;
@@ -1291,8 +1318,7 @@ client.on("messageCreate", async (message) => {
         console.log(`📢 War count request initiated by ${message.author.tag}`);
         
         try {
-            // Get the "Blatant Disregard" role by ID
-            const roleId = "1425515204942368890";
+            const roleId = WAR_COUNT_ROLE_BY_GUILD[message.guild.id] ?? LEGACY_WAR_COUNT_ROLE_ID;
             const role = message.guild.roles.cache.get(roleId);
             
             if (!role) {
@@ -1369,7 +1395,7 @@ client.on("messageCreate", async (message) => {
                 statusMessage += `⚠️ Other errors: **${otherErrorCount}** members\n`;
             }
             
-            statusMessage += `\nTotal members with "Blatant Disregard" role: **${members.length}**`;
+            statusMessage += `\nTotal members with "${role.name}" role: **${members.length}**`;
             
             await safeReply(message, statusMessage, 15000);
             
@@ -1387,7 +1413,13 @@ client.on("messageCreate", async (message) => {
     }
 
     // ----------------- MIRROR MESSAGES -----------------
-    if (!ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
+    const inBridgeChannel = isBridgeChannel(message.channel);
+    if (!inBridgeChannel && BRIDGE_LINK_REGEX.test(content)) {
+        console.log(`⚠️ Bridge link in non-bridge channel ${message.channel.id} (guild ${guildId}) — not mirroring`);
+        return;
+    }
+
+    if (!inBridgeChannel) {
         const mirrorTypes = [
             {regex:/l\+k:\/\/coordinates?\?[\d,&]+/gi, api:"coord", label:"coordinates"},
             {regex:/l\+k:\/\/report\?[\d,&]+/gi, api:"report", label:"report"},
@@ -1412,13 +1444,13 @@ client.on("messageCreate", async (message) => {
 
     // ----------------- BRIDGE DETECTION -----------------
     // Only process bridge detection in allowed channels
-    if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
-        console.log(`🔍 Checking message for bridge links: "${content.substring(0, 100)}..."`);
+    if (inBridgeChannel) {
+        console.log(`🔍 Checking message for bridge links in channel ${message.channel.id}: "${content.substring(0, 100)}..."`);
         const blocks = content.split(/\n\s*\n/);
         console.log(`📝 Split into ${blocks.length} blocks`);
         let bridgesAdded = 0;
         for (const block of blocks) {
-            const bridgeMatch = block.match(/l\+k:\/\/bridge\?[^\s]+/i);
+            const bridgeMatch = block.match(BRIDGE_LINK_REGEX);
             if (!bridgeMatch) {
                 console.log(`❌ No bridge match in block: "${block.substring(0, 50)}..."`);
                 continue;
@@ -1450,8 +1482,8 @@ client.on("messageCreate", async (message) => {
             saveBridgeList(guildId);
 
             // <-- DELETE USER MESSAGE IF IN ALLOWED CHANNEL -->
-            console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, Allowed IDs: ${ALLOWED_CHANNEL_IDS.join(', ')}, Match: ${ALLOWED_CHANNEL_IDS.includes(message.channel.id)}`);
-            if (ALLOWED_CHANNEL_IDS.includes(message.channel.id)) {
+            console.log(`🔍 Bridge added. Channel ID: ${message.channel.id}, bridge channel: ${inBridgeChannel}`);
+            if (inBridgeChannel) {
                 console.log(`🗑️ Attempting to delete user message with bridge link`);
                 try { 
                     await message.delete(); 
