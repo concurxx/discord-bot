@@ -25,6 +25,31 @@ function isBridgeChannel(channel) {
     return getBridgeChannelIds().includes(channel.id);
 }
 
+function getBridgeChannelIdForGuild(guildId) {
+    return BRIDGE_CHANNEL_BY_GUILD[guildId] || null;
+}
+
+async function getBridgeChannelForGuild(guildId) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return null;
+
+    const mappedChannelId = getBridgeChannelIdForGuild(guildId);
+    if (mappedChannelId) {
+        try {
+            return await guild.channels.fetch(mappedChannelId);
+        } catch {
+            return null;
+        }
+    }
+
+    try {
+        const legacyChannel = await guild.channels.fetch(LEGACY_BRIDGE_CHANNEL_ID);
+        return legacyChannel?.guild?.id === guildId ? legacyChannel : null;
+    } catch {
+        return null;
+    }
+}
+
 const REDIRECT_DOMAIN = "https://lnk-redirect.vercel.app/"; // Replace with your Vercel URL
 const BACKUP_LIMIT = 10; // how many backups to keep
 const WAR_COUNT_ROLE_BY_GUILD = {
@@ -96,32 +121,31 @@ function ensureCommandLogUser(userId) {
     if (!commandLog[userId]) commandLog[userId] = [];
 }
 
-function loadBridgeListForGuild(guildId) {
+function readBridgeListForGuild(guildId) {
     if (!SUPPORT_MULTI_SERVER) {
         try {
             if (fs.existsSync(LEGACY_DATA_FILE)) {
-                bridgeList = JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, "utf8"));
-            } else {
-                bridgeList = [];
+                return JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, "utf8"));
             }
         } catch (err) {
             console.log("Error reading legacy bridge list file:", err);
-            bridgeList = [];
         }
-        return;
+        return [];
     }
 
     const files = getServerDataFiles(guildId);
     try {
         if (fs.existsSync(files.bridgeList)) {
-            bridgeList = JSON.parse(fs.readFileSync(files.bridgeList, "utf8"));
-        } else {
-            bridgeList = [];
+            return JSON.parse(fs.readFileSync(files.bridgeList, "utf8"));
         }
     } catch (err) {
         console.log(`Error reading bridge list file for server ${guildId}:`, err);
-        bridgeList = [];
     }
+    return [];
+}
+
+function loadBridgeListForGuild(guildId) {
+    bridgeList = readBridgeListForGuild(guildId);
 }
 
 // Load server-specific data
@@ -176,27 +200,18 @@ async function loadServerData(guildId) {
     }
 }
 
-// Update bridge list messages for all channels of a server
+// Update the bridge list message for a single server's bridge channel
 async function updateAllChannelBridgeLists(guildId) {
     if (!SUPPORT_MULTI_SERVER) return;
-    
+
     try {
-        const guild = client.guilds.cache.get(guildId);
-        if (!guild) return;
-        
-        for (const channelId of getBridgeChannelIds()) {
-            try {
-                const channel = await guild.channels.fetch(channelId);
-                if (channel) {
-                    await updateBridgeListMessage(channel);
-                    console.log(`✅ Updated bridge list for channel ${channelId} in server ${guildId}`);
-                }
-            } catch (err) {
-                console.error(`❌ Error updating channel ${channelId} in server ${guildId}:`, err);
-            }
-        }
+        const channel = await getBridgeChannelForGuild(guildId);
+        if (!channel) return;
+
+        await updateBridgeListMessage(channel);
+        console.log(`✅ Updated bridge list for channel ${channel.id} in server ${guildId}`);
     } catch (err) {
-        console.error(`❌ Error updating bridge lists for server ${guildId}:`, err);
+        console.error(`❌ Error updating bridge list for server ${guildId}:`, err);
     }
 }
 
@@ -748,10 +763,10 @@ function formatAllStats() {
 }
 
 // ----------------- FORMAT & SPLIT -----------------
-function formatBridgeList(includeVercel = true) {
+function formatBridgeList(bridges, includeVercel = true) {
     const colorPriority = { "🔴": 1, "🟡": 2, "🟢": 3, "": 4 };
-    bridgeList.sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
-    return bridgeList.map((b, i) => {
+    const sortedBridges = [...bridges].sort((a, b) => colorPriority[a.color] - colorPriority[b.color]);
+    return sortedBridges.map((b, i) => {
         const displayName = `${i + 1}. ${b.color}${b.name}`;
         const bridgeLine = b.bridge;
         const vercelLine = includeVercel ? `[LNK](${b.vercel})` : "";
@@ -848,14 +863,16 @@ async function cleanChannel(channel) {
 
 async function updateBridgeListMessage(channel) {
     const guildId = channel.guild?.id;
-    if (guildId) {
-        loadBridgeListForGuild(guildId);
+    if (!guildId) {
+        console.error(`❌ Cannot update bridge list: channel ${channel.id} has no guild`);
+        return;
     }
 
+    const bridges = readBridgeListForGuild(guildId);
     const channelId = channel.id;
     const channelMessages = lastListMessages[channelId] || [];
     
-    if (bridgeList.length === 0) {
+    if (bridges.length === 0) {
         if (channelMessages.length > 0) {
             try {
                 await channelMessages[0].edit("Bridge list is currently empty.");
@@ -866,7 +883,7 @@ async function updateBridgeListMessage(channel) {
         return;
     }
 
-    const entries = formatBridgeList(true);
+    const entries = formatBridgeList(bridges, true);
     const chunks = splitMessage(entries);
 
     if (chunks.length === channelMessages.length) {
@@ -885,7 +902,6 @@ async function updateBridgeListMessage(channel) {
         }
     }
 
-    // Clean channel more frequently when in an allowed channel
     if (isBridgeChannel(channel)) {
         if (Math.random() < 0.3) { // 30% chance to clean in allowed channel
             await cleanChannel(channel);
@@ -917,22 +933,19 @@ client.once("ready", async () => {
                 .filter(m => m.author.id === client.user.id && m.content.startsWith("**Bridge List"))
                 .sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
 
-            if (listMessages.size>0) {
-                lastListMessages[channelId] = Array.from(listMessages.values());
-                await updateBridgeListMessage(channel);
-            } else {
-                await updateBridgeListMessage(channel);
+            lastListMessages[channelId] = listMessages.size > 0
+                ? Array.from(listMessages.values())
+                : [];
+
+            const guildId = channel.guild?.id;
+            if (SUPPORT_MULTI_SERVER && guildId) {
+                await loadServerData(guildId);
+            } else if (!SUPPORT_MULTI_SERVER) {
+                loadLegacyData();
             }
-            console.log(`✅ Initialized bridge list for channel ${channelId}`);
-            
-            // If this is a multi-server setup, load server data and update bridge list
-            if (SUPPORT_MULTI_SERVER) {
-                const guildId = channel.guild?.id;
-                if (guildId) {
-                    await loadServerData(guildId);
-                    await updateBridgeListMessage(channel);
-                }
-            }
+
+            await updateBridgeListMessage(channel);
+            console.log(`✅ Initialized bridge list for channel ${channelId} (server ${guildId || "legacy"})`);
         } catch (err) { 
             console.error(`❌ Error initializing channel ${channelId}:`, err); 
         }
