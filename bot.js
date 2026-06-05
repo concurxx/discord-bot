@@ -92,6 +92,38 @@ let commandLog = {};
 let userData = {};
 let isSaving = false; // Flag to prevent restore during save operations
 
+function ensureCommandLogUser(userId) {
+    if (!commandLog[userId]) commandLog[userId] = [];
+}
+
+function loadBridgeListForGuild(guildId) {
+    if (!SUPPORT_MULTI_SERVER) {
+        try {
+            if (fs.existsSync(LEGACY_DATA_FILE)) {
+                bridgeList = JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, "utf8"));
+            } else {
+                bridgeList = [];
+            }
+        } catch (err) {
+            console.log("Error reading legacy bridge list file:", err);
+            bridgeList = [];
+        }
+        return;
+    }
+
+    const files = getServerDataFiles(guildId);
+    try {
+        if (fs.existsSync(files.bridgeList)) {
+            bridgeList = JSON.parse(fs.readFileSync(files.bridgeList, "utf8"));
+        } else {
+            bridgeList = [];
+        }
+    } catch (err) {
+        console.log(`Error reading bridge list file for server ${guildId}:`, err);
+        bridgeList = [];
+    }
+}
+
 // Load server-specific data
 async function loadServerData(guildId) {
     if (!SUPPORT_MULTI_SERVER) {
@@ -103,16 +135,12 @@ async function loadServerData(guildId) {
     const files = getServerDataFiles(guildId);
     
     // Load bridge list
-    try { 
-        if (fs.existsSync(files.bridgeList)) {
-            bridgeList = JSON.parse(fs.readFileSync(files.bridgeList, "utf8"));
-            console.log(`📁 [Server ${guildId}] Loaded ${bridgeList.length} bridges from local file`);
-        } else {
-            bridgeList = [];
-            console.log(`📁 [Server ${guildId}] No local bridge file found, starting with empty list`);
-        }
-    } 
-    catch (err) { console.log(`Error reading bridge list file for server ${guildId}:`, err); }
+    loadBridgeListForGuild(guildId);
+    if (bridgeList.length > 0) {
+        console.log(`📁 [Server ${guildId}] Loaded ${bridgeList.length} bridges from local file`);
+    } else {
+        console.log(`📁 [Server ${guildId}] No local bridge file found, starting with empty list`);
+    }
 
     // Load command log
     try { 
@@ -820,8 +848,8 @@ async function cleanChannel(channel) {
 
 async function updateBridgeListMessage(channel) {
     const guildId = channel.guild?.id;
-    if (SUPPORT_MULTI_SERVER && guildId) {
-        await loadServerData(guildId);
+    if (guildId) {
+        loadBridgeListForGuild(guildId);
     }
 
     const channelId = channel.id;
@@ -931,7 +959,7 @@ client.on("messageCreate", async (message) => {
         }
     }
     
-    if (!commandLog[userId]) commandLog[userId] = [];
+    ensureCommandLogUser(userId);
     
     console.log(`📨 [Server ${guildId}] Processing message: "${content}" from ${message.author.username}`);
 
@@ -1120,6 +1148,7 @@ client.on("messageCreate", async (message) => {
                 }
             }
         }
+        ensureCommandLogUser(userId);
         commandLog[userId].push({command:content,timestamp:now});
         commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog(guildId);
@@ -1145,6 +1174,7 @@ client.on("messageCreate", async (message) => {
                     bridgeList.splice(bridgeIndex, 1);
                     saveBridgeList(guildId);
                     try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+                    ensureCommandLogUser(userId);
                     commandLog[userId].push({command:content,timestamp:now});
                     commandLog[userId] = commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
                     saveCommandLog(guildId);
@@ -1161,6 +1191,7 @@ client.on("messageCreate", async (message) => {
         bridgeList = [];
         saveBridgeList(guildId);
         try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+        ensureCommandLogUser(userId);
         commandLog[userId].push({command:`!clearlist (cleared ${count} bridge${count!==1?"s":""})`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog(guildId);
@@ -1234,6 +1265,7 @@ client.on("messageCreate", async (message) => {
             saveBridgeList(guildId);
         } catch(err){ console.error(err); return; }
         try { await updateBridgeListMessage(message.channel); } catch(err){ console.error(err); }
+        ensureCommandLogUser(userId);
         commandLog[userId].push({command:`!restore ${arg} (restored ${bridgeList.length} bridges)`, timestamp:now});
         commandLog[userId]=commandLog[userId].filter(e=>e.timestamp>now-24*60*60*1000);
         saveCommandLog(guildId);
